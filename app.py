@@ -1,9 +1,10 @@
-import os, sys
+import os, sys, re
 sys.path.insert(0, '/opt/render/project/src')
+from pathlib import Path
 
 PORT = int(os.environ.get('PORT', 8000))
 
-# Import supabase
+# Connect Supabase
 try:
     from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
     from supabase import create_client
@@ -13,22 +14,22 @@ except Exception as e:
     print(f"Supabase error: {e}", flush=True)
     supabase = None
 
-# Read applyflow.py and strip the server startup lines
-from pathlib import Path
+# Read applyflow.py and STRIP the server startup
 code = Path('applyflow.py').read_text(encoding='utf-8')
 
-# Remove the server startup at the bottom (last 5 lines)
-lines = code.strip().split('\n')
-# Find the last "print" and remove everything from there
-for i in range(len(lines)-1, -1, -1):
-    if 'HTTPServer' in lines[i] or 'serve_forever' in lines[i] or 'print(' in lines[i] and 'Running' in lines[i]:
-        lines = lines[:i]
+# Remove everything from the first "print("ApplyFlow" line onwards
+# That's where the old server startup begins
+lines = code.split('\n')
+clean_lines = []
+for line in lines:
+    if 'print("ApplyFlow running' in line or 'PORT = int(os.environ' in line or 'HTTPServer' in line or 'serve_forever' in line or 'webbrowser.open' in line:
         break
+    clean_lines.append(line)
 
-code_without_server = '\n'.join(lines)
-exec(code_without_server)
+clean_code = '\n'.join(clean_lines)
+exec(clean_code)
 
-# Start server with correct binding
+# Start server ONCE
 from http.server import HTTPServer
 print(f"Starting server on 0.0.0.0:{PORT}", flush=True)
 server = HTTPServer(('0.0.0.0', PORT), Handler)
