@@ -291,6 +291,6 @@ loadData();
 </script></body></html>"""
 
 print("ApplyFlow running at http://localhost:8000 (Supabase backend)")
-server = HTTPServer(('localhost', 8000), Handler)
-webbrowser.open('http://localhost:8000')
-server.serve_forever()
+PORT = int(os.environ.get('PORT', 8000))
+server = HTTPServer(('0.0.0.0', PORT), Handler)
+print(f'Running on 0.0.0.0:{PORT}', flush=True)
