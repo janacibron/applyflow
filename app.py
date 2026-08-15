@@ -14,27 +14,45 @@ except Exception as e:
     supabase = None
 
 code = Path('applyflow.py').read_text(encoding='utf-8')
-
-# Strip server startup lines
 lines = code.split('\n')
-clean_lines = []
-for line in lines:
-    if 'print("ApplyFlow running' in line or 'PORT = int(os.environ' in line or 'HTTPServer' in line or 'serve_forever' in line or 'webbrowser.open' in line:
+
+# Remove only the LAST 4 lines (server startup)
+# They are: print, PORT=, HTTPServer, print, serve_forever
+# Find the index of the FIRST "print(\"ApplyFlow running" line
+startup_idx = None
+for i, line in enumerate(lines):
+    if 'print(\"ApplyFlow running' in line or "print('ApplyFlow running" in line:
+        startup_idx = i
         break
-    clean_lines.append(line)
 
-clean_code = '\n'.join(clean_lines)
+if startup_idx:
+    lines = lines[:startup_idx]
+    print(f"Stripped {len(lines) - startup_idx} lines of server startup", flush=True)
+else:
+    print("No server startup found, using full file", flush=True)
 
-# Execute with shared globals so Handler is accessible
-namespace = {'__name__': '__main__'}
-exec(clean_code, namespace)
+clean_code = '\n'.join(lines)
 
-# Get Handler from namespace
-Handler = namespace.get('Handler')
+# Execute in global namespace
+global_ns = globals()
+exec(clean_code, global_ns)
+
+# Handler should now be in globals
+Handler = global_ns.get('Handler')
 
 if Handler is None:
-    print("ERROR: Handler not found in namespace", flush=True)
+    # Try to find it another way
+    print("Handler not in globals, searching...", flush=True)
+    for name, obj in global_ns.items():
+        if name == 'Handler':
+            Handler = obj
+            break
+
+if Handler is None:
+    print("ERROR: Cannot find Handler class", flush=True)
     sys.exit(1)
+
+print(f"Handler found: {Handler}", flush=True)
 
 # Start server
 from http.server import HTTPServer
