@@ -1,10 +1,9 @@
-import os, sys, re
+import os, sys
 sys.path.insert(0, '/opt/render/project/src')
 from pathlib import Path
 
 PORT = int(os.environ.get('PORT', 8000))
 
-# Connect Supabase
 try:
     from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
     from supabase import create_client
@@ -14,11 +13,9 @@ except Exception as e:
     print(f"Supabase error: {e}", flush=True)
     supabase = None
 
-# Read applyflow.py and STRIP the server startup
 code = Path('applyflow.py').read_text(encoding='utf-8')
 
-# Remove everything from the first "print("ApplyFlow" line onwards
-# That's where the old server startup begins
+# Strip server startup lines
 lines = code.split('\n')
 clean_lines = []
 for line in lines:
@@ -27,9 +24,19 @@ for line in lines:
     clean_lines.append(line)
 
 clean_code = '\n'.join(clean_lines)
-exec(clean_code)
 
-# Start server ONCE
+# Execute with shared globals so Handler is accessible
+namespace = {'__name__': '__main__'}
+exec(clean_code, namespace)
+
+# Get Handler from namespace
+Handler = namespace.get('Handler')
+
+if Handler is None:
+    print("ERROR: Handler not found in namespace", flush=True)
+    sys.exit(1)
+
+# Start server
 from http.server import HTTPServer
 print(f"Starting server on 0.0.0.0:{PORT}", flush=True)
 server = HTTPServer(('0.0.0.0', PORT), Handler)
