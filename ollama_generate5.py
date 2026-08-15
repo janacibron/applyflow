@@ -1,8 +1,14 @@
-import json, subprocess, uuid
+import json, re, subprocess, uuid
 from pathlib import Path
 from datetime import datetime
 
 DATA = Path("C:/va-pipeline/data")
+
+def strip_ansi(text: str) -> str:
+    text = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', text)
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text
 
 def ollama_generate(job, model="mistral:7b"):
     title = job.get('title', 'Position')
@@ -78,8 +84,10 @@ existing_job_ids = {a.get('job_id') for a in existing.get('applications', [])}
 new_apps = [a for a in applications if a.get('job_id') not in existing_job_ids]
 combined = existing.get('applications', []) + new_apps
 
-with open(apps_file, 'w') as f:
-    json.dump({"applications": combined}, f, indent=2)
+combined = [dict(a, text=strip_ansi(a.get('text','') or '')) for a in combined]
+
+with open(apps_file, 'w', encoding='utf-8') as f:
+    json.dump({"applications": combined}, f, indent=2, ensure_ascii=False)
 
 print(f"\nGenerated {len(new_apps)} applications")
 print(f"Total: {len(combined)}")

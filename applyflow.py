@@ -1,4 +1,4 @@
-import json, os, sys, webbrowser
+import json, os, sys, webbrowser, threading
 from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -12,7 +12,27 @@ from supabase import create_client
 DATA = Path("C:/va-pipeline/data")
 supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 
+# Ensure governance module is importable
+sys.path.insert(0, 'C:/va-pipeline')
+try:
+    from governance import log_event, read_events as _read_events
+except Exception:
+    def _read_events(limit=200): return []
+    def log_event(*a, **k): pass
+
 SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
+
+SCHEDULER_INTERVAL = int(os.environ.get("SCHEDULER_INTERVAL", "0"))
+
+
+def start_scheduler():
+    """Start background scheduler if enabled via SCHEDULER_INTERVAL > 0."""
+    if SCHEDULER_INTERVAL <= 0:
+        return
+    from scheduler import main as scheduler_main
+    t = threading.Thread(target=scheduler_main, args=(SCHEDULER_INTERVAL,), daemon=True)
+    t.start()
+    log_event("server_scheduler_start", {"interval_minutes": SCHEDULER_INTERVAL})
 
 def get_user(email):
     try:
@@ -75,6 +95,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.serve_json(self.get_applications())
         elif path == '/api/stats':
             self.serve_json(self.get_stats())
+        elif path == '/api/governance':
+            self.serve_json({"events": _read_events(200)})
         else:
             self.send_response(404); self.end_headers()
     
@@ -292,5 +314,7 @@ loadData();
 
 print("ApplyFlow running at http://localhost:8000 (Supabase backend)")
 PORT = int(os.environ.get('PORT', 8000))
+start_scheduler()
 server = HTTPServer(('0.0.0.0', PORT), Handler)
 print(f'Running on 0.0.0.0:{PORT}', flush=True)
+server.serve_forever()

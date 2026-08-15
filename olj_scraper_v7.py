@@ -1,4 +1,4 @@
-import json, re, http.cookiejar, urllib.request
+import json, re, http.cookiejar, urllib.request, sys
 from pathlib import Path
 from datetime import datetime
 import html as html_module
@@ -6,6 +6,11 @@ import hashlib
 
 COOKIE_FILE = Path("C:/va-pipeline/cookies/olj_cookies.txt")
 DATA = Path("C:/va-pipeline/data")
+ROOT = Path("C:/va-pipeline")
+sys.path.insert(0, str(ROOT))
+from governance import log_event
+from dedupe import load_local_jobs, local_seen_ids, local_seen_urls
+
 
 def get_opener():
     cookie_jar = http.cookiejar.MozillaCookieJar(str(COOKIE_FILE))
@@ -13,6 +18,7 @@ def get_opener():
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
     opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')]
     return opener
+
 
 def scrape_olj(opener, category):
     url = f"https://www.onlinejobs.ph/jobseekers/search/c/{category}"
@@ -49,9 +55,9 @@ def scrape_olj(opener, category):
         # Extract rate from text
         rate = ""
         rate_patterns = [
-            r'\\$[\d,]+(?:\.\d{2})?\s*(?:-\s*\\$[\d,]+)?\s*/?\s*(?:per\s*)?(?:month|hour|hr|mo)?',
+            r'\$[\d,]+(?:\.\d{2})?\s*(?:-\s*\$[\d,]+)?\s*/?\s*(?:per\s*)?(?:month|hour|hr|mo)?',
             r'\b\d+(?:K)?\s*(?:PHP|Php|₱)\b',
-            r'\\$[\d,]+(?:\.\d{2})?',
+            r'\$[\d,]+(?:\.\d{2})?',
         ]
         for pattern in rate_patterns:
             rate_match = re.search(pattern, text, re.IGNORECASE)
@@ -117,48 +123,73 @@ def scrape_olj(opener, category):
     
     return jobs
 
-# Main
-opener = get_opener()
-print("="*60)
-print("OLJ SCRAPER V7 - Clean Data")
-print("="*60)
 
-all_jobs = []
-categories = ["virtual-assistant", "seo", "social-media-marketing", "data-entry", "customer-support"]
-for cat in categories:
-    print(f"\nCategory: {cat}")
-    try:
-        jobs = scrape_olj(opener, cat)
-        all_jobs.extend(jobs)
-        print(f"  Jobs: {len(jobs)}")
-    except Exception as e:
-        print(f"  Error: {e}")
+if __name__ == "__main__":
+    opener = get_opener()
+    print("="*60)
+    print("OLJ SCRAPER V7 - Clean Data")
+    print("="*60)
 
-# Save
-jobs_file = DATA / "jobs.json"
-existing = {"jobs": []}
-if jobs_file.exists():
-    try:
-        with open(jobs_file) as f: existing = json.load(f)
-    except: pass
+    all_jobs = []
+    categories = ["virtual-assistant", "seo", "social-media-marketing", "data-entry", "customer-support"]
+    for cat in categories:
+        print(f"\nCategory: {cat}")
+        try:
+            jobs = scrape_olj(opener, cat)
+            all_jobs.extend(jobs)
+            print(f"  Jobs: {len(jobs)}")
+        except Exception as e:
+            print(f"  Error: {e}")
 
-non_olj = [j for j in existing.get("jobs", []) if j.get("platform") != "OnlineJobs.ph"]
-combined = non_olj + all_jobs
+    # Merge with existing while deduping by URL/id
+    jobs_file = DATA / "jobs.json"
+    existing_jobs = load_local_jobs()
+    existing_ids = local_seen_ids()
+    existing_urls = local_seen_urls()
 
-with open(jobs_file, 'w') as f:
-    json.dump({"jobs": combined}, f, indent=2)
+    new_jobs = []
+    seen_ids = set(existing_ids)
+    seen_urls = set(existing_urls)
+    for job in existing_jobs:
+        seen_ids.add(job.get("id", ""))
+        seen_urls.add(job.get("url", ""))
+    for job in all_jobs:
+        jid = job.get("id", "")
+        url = job.get("url", "")
+        if jid and jid in seen_ids:
+            continue
+        if url and url in seen_urls:
+            continue
+        new_jobs.append(job)
+        if jid:
+            seen_ids.add(jid)
+        if url:
+            seen_urls.add(url)
 
-print(f"\n{'='*60}")
-print(f"OLJ jobs: {len(all_jobs)}")
-print(f"Total DB: {len(combined)}")
-print(f"{'='*60}")
+    combined = existing_jobs + new_jobs
+    with open(jobs_file, 'w') as f:
+        json.dump({"jobs": combined}, f, indent=2)
 
-# Show clean sample
-print(f"\nClean sample:")
-for job in all_jobs[:15]:
-    print(f"\n  Title: {job['title'][:70]}")
-    if job.get('company') and job['company'] != 'OLJ Employer': print(f"  Company: {job['company']}")
-    if job.get('rate'): print(f"  Rate: {job['rate']}")
-    if job.get('employment_type'): print(f"  Type: {job['employment_type']}")
-    if job.get('posted_date'): print(f"  Posted: {job['posted_date']}")
-    if job.get('skills'): print(f"  Skills: {', '.join(job['skills'][:5])}")
+    log_event(
+        "scrape_complete",
+        {
+            "olj_new": len(new_jobs),
+            "olj_raw": len(all_jobs),
+            "total": len(combined),
+            "skipped_duplicates": len(all_jobs) - len(new_jobs),
+        },
+    )
+    print(f"\n{'='*60}")
+    print(f"OLJ new: {len(new_jobs)}")
+    print(f"Skipped duplicates: {len(all_jobs) - len(new_jobs)}")
+    print(f"Total DB: {len(combined)}")
+    print(f"{'='*60}")
+
+    print(f"\nClean sample:")
+    for job in new_jobs[:15]:
+        print(f"\n  Title: {job['title'][:70]}")
+        if job.get('company') and job['company'] != 'OLJ Employer': print(f"  Company: {job['company']}")
+        if job.get('rate'): print(f"  Rate: {job['rate']}")
+        if job.get('employment_type'): print(f"  Type: {job['employment_type']}")
+        if job.get('posted_date'): print(f"  Posted: {job['posted_date']}")
+        if job.get('skills'): print(f"  Skills: {', '.join(job['skills'][:5])}")

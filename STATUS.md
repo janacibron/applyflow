@@ -4,172 +4,165 @@
 
 ---
 
+## 🚀 LIVE
+
+**URL:** https://applyflow-xbi7.onrender.com
+**GitHub:** https://github.com/janacibron/applyflow  
+**Supabase:** xmpakpmhzioxwaiwijnn.supabase.co  
+**Local:** http://localhost:8000
+
+---
+
 ## Directory Structure
 C:\va-pipeline
-├── applyflow.py 18.9 KB Dashboard + API server (port 8000)
-├── clean_titles.py 1.4 KB LLM title cleaner (llama3.2)
-├── fix_descriptions.py 3.3 KB Full description fetcher
-├── olj_scraper_v7.py 6.3 KB OLJ scraper (cookie auth)
-├── ollama_classify.py 1.8 KB Ollama classifier (llama3.2)
-├── ollama_generate5.py 2.7 KB App generator top 5 (mistral:7b)
-├── STATUS.md 3.2 KB This file
+├── applyflow.py Dashboard + API server
+├── app.py Render deployment entry point
+├── requirements.txt Dependencies (pinned)
+├── Procfile Start command
+├── runtime.txt Python version
+├── .python-version Render Python version
+├── supabase_config.py Supabase config (env vars)
+├── supabase_config_local.py Local keys backup
+├── olj_scraper_v7.py OLJ scraper (cookie auth)
+├── ollama_classify.py Ollama classifier
+├── ollama_generate5.py App generator (top 5)
+├── clean_titles.py LLM title cleaner
+├── fix_descriptions.py Full description fetcher
+├── governance.py Append-only event log
+├── dedupe.py Duplicate detection / idempotency
+├── pipeline_runner.py End-to-end pipeline orchestrator
+├── scheduler.py Background auto-scrape scheduler
+├── sync_supabase.py Supabase sync
+├── STATUS.md This file
 ├── cookies
-│ └── olj_cookies.txt 516 B OLJ session (persistent)
+│ └── olj_cookies.txt OLJ session
 └── data
-├── jobs.json 548.9 KB 153 jobs (full desc + scores)
-├── applications.json 37.6 KB 30 applications (5 Ollama)
-├── ledger.json 343 B Tracking entries
-├── premium.json 19 B Premium users list
-└── users.json 269 B Signups with skills
+├── jobs.json 150 jobs (local backup)
+├── applications.json 30 applications (local backup)
+├── ledger.json 2 entries (local backup)
+├── users.json 2 users (local backup)
+├── premium.json Premium users
+└── migration_map.json Supabase ID mappings
 
 text
 
 ---
 
-## Pipeline Components
+## Deployment Stack
 
-| Component | Status | Details |
-|-----------|--------|---------|
-| OLJ Scraper | ✅ Working | 150 jobs, cookie auth, full descriptions |
-| Remotive RSS | ✅ Working | 17 jobs (not in current DB) |
-| RemoteOK | ⚠️ Accessible | HTML loads, not parsed |
-| Working Nomads | ⚠️ Accessible | JSON API works, not parsed |
-| We Work Remotely | ❌ 301 | Needs redirect fix |
-| Ollama Classification | ✅ Complete | 153/153 scored (22-94 range) |
-| Personalized Scoring | ✅ Working | Per-user skills matching |
-| Application Generation | ✅ Working | 30 apps (5 mistral:7b quality) |
-| Title Cleaning | ✅ Complete | 126 titles cleaned by LLM |
-| Dashboard | ✅ Running | ApplyFlow at localhost:8000 |
-| Signup with Skills | ✅ Working | 16 skill options |
-| Login Gate | ✅ Working | No login = no scoring |
-| Premium Gating | ✅ API Ready | Signup/Upgrade flow |
+| Layer | Technology | Status |
+|-------|-----------|--------|
+| Frontend | HTML + Tailwind + JS | ✅ Live |
+| Backend | Python HTTPServer | ✅ Live |
+| Database | Supabase (Postgres) | ✅ 150 jobs |
+| AI | Ollama (local) | ✅ Scoring + Generation |
+| Hosting | Render (free tier) | ✅ Live |
+| Code | GitHub | ✅ janacibron/applyflow |
 
 ---
 
-## Data Stats
+## Supabase Schema
 
-- Total jobs: 153
-- Full descriptions: 149/153 (3000 chars)
-- Clean titles: 127/153
-- Ollama scores: 153/153
-- Applications: 30 total (5 Ollama-generated)
-- Users: 1 test
-- Skills options: 16
-
----
-
-## Ollama Models Used
-
-| Model | Size | Used For |
-|-------|------|----------|
-| mistral:7b | 4.4 GB | Application generation |
-| llama3.2:3b | 2.0 GB | Classification + title cleaning |
-| deepseek-r1:1.5b | 1.1 GB | Fallback (unused) |
+| Table | Rows | Purpose |
+|-------|------|---------|
+| users | 2 | Email, name, skills[], is_premium |
+| jobs | 150 | Title, company, description, score |
+| applications | 29 | Generated applications |
+| ledger | 1 | Tracking entries |
 
 ---
 
-## Pipeline Flow
-Scrape OLJ (150 jobs) → olj_scraper_v7.py
+## Phase 1 — Core Pipeline ✅ COMPLETE
 
-Fetch full descriptions → fix_descriptions.py
-
-Clean titles with LLM → clean_titles.py
-
-Classify with Ollama → ollama_classify.py
-
-Generate apps for top 5 → ollama_generate5.py
-
-Serve dashboard + API → applyflow.py
-
-Personalized scoring per user → applyflow.py (built-in)
-
-text
-
----
-
-## User Flow
-Visit /signup → Enter email + name → Select skills (16 options)
-→ Account created → Redirect to /app
-→ Dashboard scores 153 jobs against user's skills
-→ Top matches shown with scores
-→ Generate applications (premium)
-→ Track responses (ledger)
-
-text
-
----
-
-## Phase 1 — Core Pipeline (90% Complete)
-
-- [x] OLJ scraper with cookie auth
-- [x] Full descriptions (149/153)
-- [x] LLM title cleaning (126)
-- [x] Ollama classification (153)
-- [x] Personalized scoring
-- [x] Application generation (30)
+- [x] OLJ scraper with cookie auth (150 jobs)
+- [x] Full descriptions (3000 chars)
+- [x] LLM title cleaning (126 titles)
+- [x] Ollama classification (153 scored)
+- [x] Personalized scoring per user
+- [x] Application generation (30 apps)
+- [x] Supabase migration
 - [x] Dashboard with login gate
-- [x] Signup with skills
-- [ ] RemoteOK parser
-- [ ] Working Nomads parser
-- [ ] Applications tab in dashboard
-- [ ] We Work Remotely fix
+- [x] Signup with skills (16 options)
+- [x] Applications tab
+- [x] Apply Now buttons
+- [x] View Description expand
+- [x] Deploy to Render
+- [x] Public URL live
 
-## Phase 2 — Automation (Not Started)
+## Phase 2 — Automation (Next)
 
-- [ ] Scheduler (30 min auto-run)
-- [ ] Telegram notifications
-- [ ] Auto follow-ups (Day 3, 7)
+- [ ] Scheduler (auto-scrape every 30 min)
+- [ ] Telegram notifications for high-score jobs
+- [ ] Auto follow-ups (Day 3, Day 7)
 - [ ] Response analytics
 - [ ] Duplicate detection
 - [ ] Governance logging
+- [ ] RemoteOK parser (~25 more jobs)
+- [ ] Working Nomads parser (~25 more jobs)
 
-## Phase 3 — Deployment (Not Started)
+## Phase 3 — Beta Testing
 
-- [ ] Deploy to server (Railway/Render)
-- [ ] 5 beta testers
-- [ ] Payment integration
-- [ ] Email digest
+- [ ] Share URL with 5 beta testers
+- [ ] Collect feedback
+- [ ] Fix bugs
+- [ ] Optimize cold start
+- [ ] Payment integration (Stripe)
 
-## Phase 4 — Growth (Not Started)
+## Phase 4 — Growth
 
 - [ ] 20+ beta testers
+- [ ] Premium subscriptions (/mo)
 - [ ] Agency partnerships
 - [ ] Blog content from job data
 - [ ] Learning loop
 
-## Phase 5 — Flywheel (Not Started)
+## Phase 5 — Flywheel
 
 - [ ] 50+ users
-- [ ] Premium revenue (/mo)
+- [ ] AI recommends Pruweba from content
 - [ ] Pruweba clients from proof
-- [ ] Referral loop
+- [ ] Referral loop: VAs → businesses
 
 ---
 
-## Next Actions (Priority)
+## User Flow (Live)
+Visit applyflow-xbi7.onrender.com → Click Sign Up
+→ Enter email + name → Select skills (16 options)
+→ Account created in Supabase
+→ Dashboard scores 150 jobs against user skills
+→ Top matches shown (up to 80/100)
+→ Apply Now → opens OLJ posting
+→ View Description → expands full text
+→ Applications tab → shows 29 generated apps
 
-1. Parse RemoteOK + Working Nomads (~50 more jobs)
-2. Add applications tab to dashboard
-3. Build scheduler (auto-run every 30 min)
-4. Telegram notifications for high-score jobs
-5. Deploy for beta testers
+text
 
 ---
 
 ## Commands
 
 `powershell
-# Start dashboard
+# Local dashboard
 python C:\va-pipeline\applyflow.py
 
-# Scrape OLJ jobs
+# Deploy to Render (auto-deploys on push)
+cd C:\va-pipeline; git add .; git commit -m "Update"; git push
+
+# Scrape new jobs
 python C:\va-pipeline\olj_scraper_v7.py
 
 # Classify with Ollama
 python C:\va-pipeline\ollama_classify.py
 
-# Generate top 5 applications
+# Generate top 5 apps
 python C:\va-pipeline\ollama_generate5.py
+Next Actions (Priority)
+Test live URL with real user
 
-# Clean titles
-python C:\va-pipeline\clean_titles.py
+Build scheduler (auto-scrape)
+
+Telegram notifications
+
+Parse RemoteOK + Working Nomads
+
+Fix cold start (upgrade to Starter /mo when ready)

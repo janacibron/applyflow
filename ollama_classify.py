@@ -1,8 +1,12 @@
-import json, subprocess, re
+import json, re, subprocess, sys
 from pathlib import Path
 from datetime import datetime
 
 DATA = Path("C:/va-pipeline/data")
+ROOT = Path("C:/va-pipeline")
+sys.path.insert(0, str(ROOT))
+from governance import log_event
+
 
 def ollama_classify(job, model="llama3.2:3b"):
     title = job.get('title', '')[:100]
@@ -31,31 +35,40 @@ Return ONLY a number. No text."""
     except Exception:
         return None
 
-with open(DATA / 'jobs.json') as f:
-    data = json.load(f)
 
-jobs = data.get('jobs', [])
-print(f"Classifying {len(jobs)} jobs with llama3.2:3b...")
+def main():
+    with open(DATA / 'jobs.json') as f:
+        data = json.load(f)
 
-scored = 0
-for i, job in enumerate(jobs):
-    if job.get('ollama_score') is not None:
-        continue
-    
-    title = job.get('title', 'N/A')[:50]
-    score = ollama_classify(job)
-    
-    if score is not None:
-        job['ollama_score'] = score
-        job['score'] = score
-        job['classified_by'] = 'ollama'
-        job['classified_at'] = str(datetime.now())
-        scored += 1
-        print(f"[{i+1}/{len(jobs)}] {score}/100 - {title}")
-    else:
-        print(f"[{i+1}/{len(jobs)}] FAIL - {title}")
+    jobs = data.get('jobs', [])
+    print(f"Classifying {len(jobs)} jobs with llama3.2:3b...")
 
-with open(DATA / 'jobs.json', 'w') as f:
-    json.dump({"jobs": jobs}, f, indent=2)
+    scored = 0
+    for i, job in enumerate(jobs):
+        if job.get('ollama_score') is not None:
+            continue
+        
+        title = job.get('title', 'N/A')[:50]
+        score = ollama_classify(job)
+        
+        if score is not None:
+            job['ollama_score'] = score
+            job['score'] = score
+            job['classified_by'] = 'ollama'
+            job['classified_at'] = str(datetime.now())
+            scored += 1
+            print(f"[{i+1}/{len(jobs)}] {score}/100 - {title}")
+        else:
+            log_event("classify_fail", {"index": i, "title": title})
+            print(f"[{i+1}/{len(jobs)}] FAIL - {title}")
 
-print(f"\nScored {scored} jobs with Ollama")
+    log_event("classify_complete", {"total": len(jobs), "scored": scored, "skipped": len(jobs) - scored})
+
+    with open(DATA / 'jobs.json', 'w') as f:
+        json.dump({"jobs": jobs}, f, indent=2)
+
+    print(f"\nScored {scored} jobs with Ollama")
+
+
+if __name__ == "__main__":
+    main()
