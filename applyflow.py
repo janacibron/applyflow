@@ -92,6 +92,11 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ['/', '/index.html']:
+            if self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/dashboard')
+                self.end_headers()
+                return
             self.serve_html(self.landing_page())
         elif path == '/login':
             if self._current_token():

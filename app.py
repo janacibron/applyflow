@@ -92,6 +92,11 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ['/', '/index.html']:
+            if self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/dashboard')
+                self.end_headers()
+                return
             self.serve_html(self.landing_page())
         elif path == '/login':
             if self._current_token():
@@ -131,7 +136,6 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == '/api/applications':
             self.serve_json(self.get_applications())
         elif path.startswith('/api/applications/') and path.endswith('/status'):
-            # POST /api/applications/:id/status — transition state
             self.do_POST()
             return
         elif path.startswith('/api/jobs/') and path.endswith('/status'):
@@ -189,7 +193,6 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_header('Content-type', 'application/json')
                 token = result.get('token', '')
                 if token:
-                    # Secure + HttpOnly + SameSite=Strict — prevents CSRF and token leakage
                     self.send_header('Set-Cookie', f"va_token={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={86400}")
                 self.end_headers()
                 self.wfile.write(body)
@@ -203,7 +206,6 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif path.startswith('/api/applications/') and path.endswith('/status'):
-            # POST /api/applications/:id/status
             parts = path.strip('/').split('/')
             app_id = parts[2] if len(parts) >= 3 else ''
             new_state = data.get('status', '')
@@ -212,14 +214,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(401); self.end_headers()
                 self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
                 return
-            # Load applications
             apps = self.get_applications().get('applications', [])
             app = next((a for a in apps if a.get('id') == app_id), None)
             if not app:
                 self.send_response(404); self.end_headers()
                 self.wfile.write(json.dumps({"error": "Application not found"}).encode())
                 return
-            # Ownership check
             if app.get('user_id') != user.get('email') and user.get('role') != 'admin':
                 self.send_response(403); self.end_headers()
                 self.wfile.write(json.dumps({"error": "Forbidden"}).encode())
@@ -318,7 +318,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_response(400)
             self.end_headers()
             return None
-        path = STATIC / safe
+        path = STATIC / rel_path.replace('/', os.sep)
         if not path.exists() or not path.is_file():
             self.send_response(404)
             self.end_headers()
