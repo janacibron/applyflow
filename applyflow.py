@@ -29,7 +29,7 @@ except Exception:
     def _read_events(limit=200): return []
     def log_event(*a, **k): pass
 
-from auth import login_user, logout_user, get_session, validate_login, create_user, ensure_default_admin
+from auth import login_user, logout_user, get_session, validate_login, create_user, ensure_default_admin, get_user
 
 SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
 
