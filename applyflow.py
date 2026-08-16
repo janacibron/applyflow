@@ -92,11 +92,6 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ['/', '/index.html']:
-            if self._current_token():
-                self.send_response(302)
-                self.send_header('Location', '/dashboard')
-                self.end_headers()
-                return
             self.serve_html(self.landing_page())
         elif path == '/login':
             if self._current_token():
@@ -345,10 +340,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def get_jobs(self, params):
         user = self._current_user()
-        if not user:
-            email = params.get('email', [''])[0]
-            user = get_user(email)
-        if not user: return {"jobs":[], "logged_in":False}
+        logged_in = user is not None
 
         jobs = []
         if supabase is not None:
@@ -368,12 +360,16 @@ class Handler(SimpleHTTPRequestHandler):
                 except Exception:
                     jobs = []
 
+        user_skills = user.get('skills', []) if user else []
         for job in jobs:
-            scoring = score_job_for_user(job, user.get('skills', []))
-            job['user_score'] = scoring['score']
-            job['user_matched_skills'] = scoring['matched_skills']
+            if user_skills:
+                scoring = score_job_for_user(job, user_skills)
+                job['user_score'] = scoring['score']
+                job['user_matched_skills'] = scoring['matched_skills']
+            else:
+                job['user_score'] = job.get('score', 0)
+                job['user_matched_skills'] = []
 
-        # Search/filter
         keyword = params.get('keyword', [''])[0].lower()
         platform = params.get('platform', [''])[0].lower()
         location = params.get('location', [''])[0].lower()
@@ -398,7 +394,7 @@ class Handler(SimpleHTTPRequestHandler):
             jobs = sorted(jobs, key=lambda x: x.get('rate',''), reverse=True)
 
         jobs = jobs[:limit]
-        return {"jobs":jobs, "logged_in":True, "user_skills":user.get('skills',[])}
+        return {"jobs":jobs, "logged_in":logged_in, "user_skills":user_skills}
 
     def get_applications(self):
         apps = []

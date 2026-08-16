@@ -30,36 +30,54 @@
     <div class="panel p-5 font-mono-brand text-[13px]"><div class="flex justify-between mb-3"><span class="tag">supabase.log</span><span class="tag text-[var(--cyan)]">connected</span></div>
     <div class="space-y-1"><div>[DB] 150 jobs in Supabase</div><div>[USER] Personalized scoring</div><div class="text-[var(--amber)]">[MATCH] Top jobs found</div></div></div>
   </section>
+  <section id="jobs" class="max-w-6xl mx-auto px-6 py-16">
+    <p class="tag mb-3">[BROWSE JOBS]</p>
+    <h2 class="font-mono-brand text-2xl md:text-3xl font-semibold mb-8">Latest VA jobs.</h2>
+    <div class="flex gap-3 mb-6">
+      <input type="text" id="search-keyword" placeholder="Search jobs..." class="flex-1" style="background:var(--steel);border:1px solid var(--steel-line);border-radius:.5rem;padding:10px 15px;color:var(--manifest);outline:none">
+      <button onclick="searchJobs()" class="btn-primary px-6 py-2 rounded text-sm">Search</button>
+    </div>
+    <div id="public-job-feed" class="grid gap-4">
+      <div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">Loading jobs...</div>
+    </div>
+    <div class="text-center mt-8"><a href="/signup" class="btn-primary px-6 py-3 rounded text-sm">Sign Up to Apply</a></div>
+  </section>
   <footer class="divider"><div class="max-w-6xl mx-auto px-6 py-10 text-center tag">ApplyFlow 2026</div></footer>
-<script>
-const token = localStorage.getItem('va_token') || document.cookie.split('; ').find(r=>r.startsWith('va_token='))?.split('=')[1];
-if (token) {
-    document.getElementById('nav-login').style.display = 'none';
-    document.getElementById('nav-signup').style.display = 'none';
-    document.getElementById('nav-logout').style.display = 'inline';
-    const email = localStorage.getItem('va_email');
-    if (email) {
-        document.getElementById('nav-login').textContent = email.split('@')[0];
-        document.getElementById('nav-login').style.display = 'inline';
+  <script>
+    const token = localStorage.getItem('va_token') || document.cookie.split('; ').find(r=>r.startsWith('va_token='))?.split('=')[1];
+    if (token) {
+      const email = localStorage.getItem('va_email');
+      document.getElementById('nav-login').style.display = 'none';
+      document.getElementById('nav-signup').style.display = 'none';
+      document.getElementById('nav-logout').style.display = 'inline';
+      if (email) {
+        const el = document.createElement('span');
+        el.className = 'tag';
+        el.textContent = email.split('@')[0];
+        document.querySelector('nav').prepend(el);
+      }
     }
-}
-</script>
-<script>
-const token = localStorage.getItem('va_token') || document.cookie.split('; ').find(r=>r.startsWith('va_token='))?.split('=')[1];
-if (token) {
-    const email = localStorage.getItem('va_email') || '';
-    const navLinks = document.querySelectorAll('nav a');
-    navLinks.forEach(a => {
-        if (a.textContent === 'Login' || a.textContent === 'Sign Up') {
-            a.style.display = 'none';
-        }
-    });
-    const logout = document.createElement('a');
-    logout.href = '/logout';
-    logout.textContent = 'Sign Out';
-    logout.className = 'hover:text-[var(--cyan)]';
-    document.querySelector('nav').appendChild(logout);
-}
-</script>
+
+    function renderJobs(jobs) {
+      const feed = document.getElementById('public-job-feed');
+      if (!jobs || !jobs.length) { feed.innerHTML = '<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No jobs found.</div>'; return; }
+      let html = '';
+      jobs.slice(0, 10).forEach(job => {
+        const score = job.user_score || job.score || 0;
+        const sc = score >= 70 ? 'score-high' : score >= 40 ? 'score-medium' : 'score-low';
+        html += '<div class="panel p-5"><div class="flex justify-between items-start mb-2"><div><div class="font-mono-brand font-semibold">' + (job.title||'Job').substring(0,60) + '</div><div class="text-sm text-[var(--manifest-dim)]">' + (job.company||'') + ' &bull; ' + (job.platform||'') + '</div></div><span class="tag ' + sc + '" style="padding:2px 10px;border-radius:20px">' + score + '/100</span></div><div class="text-sm text-[var(--manifest-dim)]">' + (job.rate||'') + ' &bull; ' + (job.employment_type||'') + '</div></div>';
+      });
+      feed.innerHTML = html;
+    }
+
+    function searchJobs() {
+      const kw = document.getElementById('search-keyword').value.trim();
+      const url = kw ? '/api/jobs?limit=20&keyword=' + encodeURIComponent(kw) : '/api/jobs?limit=20';
+      fetch(url).then(r=>r.json()).then(data=>renderJobs(data.jobs)).catch(()=>{ document.getElementById('public-job-feed').innerHTML = '<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">Could not load jobs.</div>'; });
+    }
+
+    // Initial load
+    fetch('/api/jobs?limit=20').then(r=>r.json()).then(data=>renderJobs(data.jobs)).catch(()=>{ document.getElementById('public-job-feed').innerHTML = '<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">Could not load jobs.</div>'; });
+  </script>
 </body>
 </html>
