@@ -45,6 +45,7 @@
       if(skills.length===0){alert('Select at least one skill');return;}
       fetch('/api/signup',{method:'POST',body:JSON.stringify({email:email,name:name,password:password,skills:skills}),headers:{'Content-Type':'application/json'}})
       .then(r=>r.json()).then(data=>{
+        if(!data){alert('Signup failed. Try again.');return;}
         if(data && data.error){alert(data.error);return;}
         localStorage.setItem('va_token', data.token || '');
         window.location.href='/dashboard';
