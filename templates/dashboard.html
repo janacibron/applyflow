@@ -59,6 +59,10 @@
       const qs = new URLSearchParams(window.location.search).get('token');
       if (qs) { currentToken = qs; localStorage.setItem('va_token', qs); }
     }
+    if (!currentToken) {
+      const cookieToken = document.cookie.split('; ').find(r => r.startsWith('va_token='))?.split('=')[1];
+      if (cookieToken) { currentToken = cookieToken; localStorage.setItem('va_token', cookieToken); }
+    }
     let currentUser = null;
     try { currentUser = JSON.parse(localStorage.getItem('va_user') || 'null'); } catch(e) { currentUser = null; }
 

@@ -52,7 +52,8 @@
         if(data.ok){
           localStorage.setItem('va_token', data.token);
           if(data.user){ localStorage.setItem('va_user', JSON.stringify(data.user)); }
-          document.cookie = 'va_token=' + data.token + '; path=/';
+          if(data.user){ localStorage.setItem('va_email', data.user.email); }
+          document.cookie = 'va_token=' + data.token + '; path=/; max-age=86400';
           window.location.href='/dashboard?token=' + encodeURIComponent(data.token);
         } else {
           showError((data.errors||[]).join(' '));
