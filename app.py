@@ -1,61 +1,278 @@
-import os, sys
-sys.path.insert(0, '/opt/render/project/src')
+import json, os, sys, webbrowser, threading
+from datetime import datetime
 from pathlib import Path
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
-PORT = int(os.environ.get('PORT', 8000))
+# Load .env from project root if present
+_env_path = Path(__file__).resolve().parent / '.env'
+if _env_path.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_path)
+    except Exception:
+        pass
 
+sys.path.insert(0, 'C:/va-pipeline')
+from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
+
+from supabase import create_client
+
+DATA = Path("C:/va-pipeline/data")
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+
+# Ensure governance module is importable
+sys.path.insert(0, 'C:/va-pipeline')
 try:
-    from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
-    from supabase import create_client
-    supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
-    print(f"Supabase connected", flush=True)
-except Exception as e:
-    print(f"Supabase error: {e}", flush=True)
-    supabase = None
+    from governance import log_event, read_events as _read_events
+except Exception:
+    def _read_events(limit=200): return []
+    def log_event(*a, **k): pass
 
-code = Path('applyflow.py').read_text(encoding='utf-8')
-lines = code.split('\n')
+from auth import login_user, logout_user, get_session, validate_login, create_user, ensure_default_admin
 
-# Remove only the LAST 4 lines (server startup)
-# They are: print, PORT=, HTTPServer, print, serve_forever
-# Find the index of the FIRST "print(\"ApplyFlow running" line
-startup_idx = None
-for i, line in enumerate(lines):
-    if 'print(\"ApplyFlow running' in line or "print('ApplyFlow running" in line:
-        startup_idx = i
-        break
+SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
 
-if startup_idx:
-    lines = lines[:startup_idx]
-    print(f"Stripped {len(lines) - startup_idx} lines of server startup", flush=True)
-else:
-    print("No server startup found, using full file", flush=True)
+SCHEDULER_INTERVAL = int(os.environ.get("SCHEDULER_INTERVAL", "0"))
 
-clean_code = '\n'.join(lines)
 
-# Execute in global namespace
-global_ns = globals()
-exec(clean_code, global_ns)
+def start_scheduler():
+    """Start background scheduler if enabled via SCHEDULER_INTERVAL > 0."""
+    if SCHEDULER_INTERVAL <= 0:
+        return
+    from scheduler import main as scheduler_main
+    t = threading.Thread(target=scheduler_main, args=(SCHEDULER_INTERVAL,), daemon=True)
+    t.start()
+    log_event("server_scheduler_start", {"interval_minutes": SCHEDULER_INTERVAL})
 
-# Handler should now be in globals
-Handler = global_ns.get('Handler')
+def score_job_for_user(job, user_skills):
+    if not user_skills: return {"score": 0, "matched_skills": []}
+    score = 0; matched = []
+    combined = (job.get('title','') + ' ' + job.get('description','')).lower()
+    aliases = {"SEO":["seo","keyword","ranking"],"Content Writing":["content","writing","blog"],"WordPress":["wordpress","wp"],"Social Media":["social","instagram","facebook"],"Email Management":["email","inbox"],"Calendar Management":["calendar","scheduling"],"Data Entry":["data entry","excel"],"Customer Service":["customer","support"],"GoHighLevel":["gohighlevel","ghl","crm"],"Video Editing":["video","capcut"],"Canva":["canva","design"],"Copywriting":["copywriting","copy"],"AI Tools":["ai","chatgpt"],"Admin Support":["admin","administrative"],"Marketing":["marketing","ads"],"Sales":["sales","cold call","b2b"]}
+    for skill in user_skills:
+        for alias in aliases.get(skill, [skill.lower()]):
+            if alias in combined:
+                matched.append(skill); break
+    unique = list(set(matched))
+    score += min(len(unique)*10, 60)
+    rate = job.get('rate','') or ''
+    if '$' in rate:
+        import re
+        amounts = re.findall(r'\$[\d,]+', rate)
+        if amounts:
+            try:
+                rates = [float(a.replace('$','').replace(',','')) for a in amounts]
+                if 4 <= min(rates) <= 15: score += 20
+            except: pass
+    if 'full' in (job.get('employment_type','') or '').lower(): score += 10
+    dlen = len(job.get('description','') or '')
+    if dlen > 500: score += 10
+    elif dlen > 100: score += 5
+    return {"score": min(score,100), "matched_skills": unique}
 
-if Handler is None:
-    # Try to find it another way
-    print("Handler not in globals, searching...", flush=True)
-    for name, obj in global_ns.items():
-        if name == 'Handler':
-            Handler = obj
-            break
+class Handler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path in ['/', '/index.html']:
+            self.serve_html(self.landing_page())
+        elif path == '/login':
+            if self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/dashboard')
+                self.end_headers()
+                return
+            html = self.render_template('login.html')
+            if html is not None:
+                self.serve_html(html)
+        elif path == '/dashboard':
+            if not self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.end_headers()
+                return
+            html = self.render_template('dashboard.html')
+            if html is not None:
+                self.serve_html(html)
+        elif path == '/signup':
+            if self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/dashboard')
+                self.end_headers()
+                return
+            html = self.render_template('signup.html', {'skills_html': self._skills_html()})
+            if html is not None:
+                self.serve_html(html)
+        elif path.startswith('/static/'):
+            self.serve_static(path[len('/static/'):])
+        elif path == '/api/jobs':
+            self.serve_json(self.get_jobs(parse_qs(urlparse(self.path).query)))
+        elif path == '/api/applications':
+            self.serve_json(self.get_applications())
+        elif path == '/api/stats':
+            self.serve_json(self.get_stats())
+        elif path == '/api/governance':
+            self.serve_json({"events": _read_events(200)})
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length).decode() if content_length else ""
+        try: data = json.loads(body)
+        except: data = parse_qs(body)
+        path = urlparse(self.path).path
+        if path == '/api/signup':
+            self.serve_json(create_user(data.get('email',''), data.get('password',''), data.get('name',''), data.get('skills',[])))
+        elif path == '/api/login':
+            ip = self.headers.get('X-Forwarded-For', self.client_address[0] if hasattr(self, 'client_address') else '')
+            ua = self.headers.get('User-Agent', '')
+            result = login_user(data.get('email',''), data.get('password',''), ip=ip, user_agent=ua)
+            if not result.get('ok'):
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+            else:
+                self.serve_json(result)
+        elif path == '/api/logout':
+            token = data.get('token', '')
+            self.serve_json({"ok": logout_user(token)})
+        else:
+            self.send_response(404); self.end_headers()
+    
+    def serve_html(self, html):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
 
-if Handler is None:
-    print("ERROR: Cannot find Handler class", flush=True)
-    sys.exit(1)
+    def render_template(self, name, context=None):
+        path = DATA.parent / 'templates' / name
+        if not path.exists():
+            self.send_response(404)
+            self.end_headers()
+            return None
+        html = path.read_text(encoding='utf-8')
+        if context:
+            for key, value in context.items():
+                html = html.replace('{{ ' + key + ' }}', str(value))
+        return html
 
-print(f"Handler found: {Handler}", flush=True)
+    def serve_static(self, rel_path):
+        safe = rel_path.replace('/', os.sep)
+        if safe.startswith(os.sep) or '..' in safe:
+            self.send_response(400)
+            self.end_headers()
+            return None
+        path = DATA.parent / safe
+        if not path.exists() or not path.is_file():
+            self.send_response(404)
+            self.end_headers()
+            return None
+        mime = {
+            '.css': 'text/css',
+            '.js': 'application/javascript',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.svg': 'image/svg+xml',
+        }.get(path.suffix.lower(), 'application/octet-stream')
+        self.send_response(200)
+        self.send_header('Content-type', mime)
+        self.end_headers()
+        data = path.read_bytes()
+        self.wfile.write(data)
+        return None
 
-# Start server
-from http.server import HTTPServer
-print(f"Starting server on 0.0.0.0:{PORT}", flush=True)
-server = HTTPServer(('0.0.0.0', PORT), Handler)
-server.serve_forever()
+    def serve_json(self, data):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+    
+    def get_jobs(self, params):
+        user = None
+        auth = self.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            token = auth.split(' ', 1)[1].strip()
+            session = get_session(token)
+            if session:
+                user = get_user(session['email'])
+        if not user:
+            email = params.get('email', [''])[0]
+            user = get_user(email)
+        if not user: return {"jobs":[], "logged_in":False}
+        
+        jobs = []
+        if supabase:
+            try:
+                result = supabase.table('jobs').select('*').execute()
+                jobs = result.data or []
+            except:
+                pass
+        
+        for job in jobs:
+            scoring = score_job_for_user(job, user.get('skills', []))
+            job['user_score'] = scoring['score']
+            job['user_matched_skills'] = scoring['matched_skills']
+        
+        jobs = sorted(jobs, key=lambda x: x.get('user_score',0), reverse=True)
+        return {"jobs":jobs, "logged_in":True, "user_skills":user.get('skills',[])}
+    
+    def get_applications(self):
+        apps = []
+        if supabase:
+            try:
+                result = supabase.table('applications').select('*').order('created_at', desc=True).execute()
+                apps = result.data or []
+            except:
+                pass
+        return {"applications": apps, "total": len(apps)}
+    
+    def get_stats(self):
+        try:
+            jobs_count = supabase.table('jobs').select('count', count='exact').execute().count
+            apps_count = supabase.table('applications').select('count', count='exact').execute().count
+            users_count = supabase.table('users').select('count', count='exact').execute().count
+        except:
+            jobs_count = apps_count = users_count = 0
+        return {"total_jobs": jobs_count, "applications": apps_count, "tracked": 0, "responses": 0, "users": users_count}
+    
+    def log_message(self, *args): pass
+
+    def _current_token(self):
+        auth = self.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            token = auth.split(' ', 1)[1].strip()
+            if token and get_session(token):
+                return token
+        cookie = self.headers.get('Cookie', '')
+        for part in cookie.split(';'):
+            part = part.strip()
+            if part.startswith('va_token='):
+                token = part.split('=', 1)[1]
+                if token and get_session(token):
+                    return token
+        return None
+
+    def _skills_html(self):
+        return "".join(f'<label class="skill-check"><input type="checkbox" value="{s}" class="skill-box"> {s}</label>' for s in SKILL_OPTIONS)
+
+    def landing_page(self):
+        return self.render_template('landing.html') or ''
+
+    def signup_page(self):
+        return self.render_template('signup.html', {'skills_html': self._skills_html()}) or ''
+
+    def dashboard_page(self):
+        return self.render_template('dashboard.html') or ''
+
+print("ApplyFlow running at http://localhost:8000 (Supabase backend)")
+PORT = int(os.environ.get('PORT', 8000))
+start_scheduler()
+ensure_default_admin()
+if __name__ == '__main__':
+    server = HTTPServer(('0.0.0.0', PORT), Handler)
+    print(f'Running on 0.0.0.0:{PORT}', flush=True)
+    server.serve_forever()
