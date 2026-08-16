@@ -4,6 +4,15 @@ from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
+# Load .env from project root if present
+_env_path = Path(__file__).resolve().parent / '.env'
+if _env_path.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_path)
+    except Exception:
+        pass
+
 sys.path.insert(0, 'C:/va-pipeline')
 from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
 
@@ -20,6 +29,8 @@ except Exception:
     def _read_events(limit=200): return []
     def log_event(*a, **k): pass
 
+from auth import login_user, logout_user, get_session, validate_login, create_user, ensure_default_admin
+
 SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
 
 SCHEDULER_INTERVAL = int(os.environ.get("SCHEDULER_INTERVAL", "0"))
@@ -33,26 +44,6 @@ def start_scheduler():
     t = threading.Thread(target=scheduler_main, args=(SCHEDULER_INTERVAL,), daemon=True)
     t.start()
     log_event("server_scheduler_start", {"interval_minutes": SCHEDULER_INTERVAL})
-
-def get_user(email):
-    try:
-        result = supabase.table('users').select('*').eq('email', email).execute()
-        if result.data:
-            return result.data[0]
-    except: pass
-    return None
-
-def signup(email, name, skills):
-    if get_user(email): return {"error": "Email exists"}
-    try:
-        result = supabase.table('users').insert({
-            'email': email, 'name': name or email.split('@')[0], 'skills': skills
-        }).execute()
-        if result.data:
-            return result.data[0]
-    except Exception as e:
-        return {"error": str(e)}
-    return {"error": "Failed"}
 
 def score_job_for_user(job, user_skills):
     if not user_skills: return {"score": 0, "matched_skills": []}
@@ -85,6 +76,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ['/', '/index.html']:
             self.serve_html(self.landing_page())
+        elif path == '/login':
+            self.serve_html(self.login_page())
         elif path == '/app':
             self.serve_html(self.dashboard_page())
         elif path == '/signup':
@@ -107,7 +100,14 @@ class Handler(SimpleHTTPRequestHandler):
         except: data = parse_qs(body)
         path = urlparse(self.path).path
         if path == '/api/signup':
-            self.serve_json(signup(data.get('email',''), data.get('name',''), data.get('skills',[])))
+            self.serve_json(create_user(data.get('email',''), data.get('password',''), data.get('name',''), data.get('skills',[])))
+        elif path == '/api/login':
+            ip = self.headers.get('X-Forwarded-For', self.client_address[0] if hasattr(self, 'client_address') else '')
+            ua = self.headers.get('User-Agent', '')
+            self.serve_json(login_user(data.get('email',''), data.get('password',''), ip=ip, user_agent=ua))
+        elif path == '/api/logout':
+            token = data.get('token', '')
+            self.serve_json({"ok": logout_user(token)})
         else:
             self.send_response(404); self.end_headers()
     
@@ -124,8 +124,16 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
     
     def get_jobs(self, params):
-        email = params.get('email', [''])[0]
-        user = get_user(email)
+        user = None
+        auth = self.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            token = auth.split(' ', 1)[1].strip()
+            session = get_session(token)
+            if session:
+                user = get_user(session['email'])
+        if not user:
+            email = params.get('email', [''])[0]
+            user = get_user(email)
         if not user: return {"jobs":[], "logged_in":False}
         
         try:
@@ -161,6 +169,66 @@ class Handler(SimpleHTTPRequestHandler):
     
     def log_message(self, *args): pass
     
+    def login_page(self):
+        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ApplyFlow - Login</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script><style>
+:root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
+body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
+.tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
+.font-mono-brand{font-family:'IBM Plex Mono',monospace;}
+.btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;cursor:pointer;border:none;}
+input[type=text],input[type=email],input[type=password]{background:var(--steel);border:1px solid var(--steel-line);border-radius:.5rem;padding:10px 15px;color:var(--manifest);width:100%;outline:none;}
+.error{color:#E2574C;font-size:.8rem;}
+</style></head><body>
+<div class="panel p-8 max-w-md w-full">
+  <div class="text-center mb-8"><h1 class="font-mono-brand font-bold text-2xl mb-2">APPLYFLOW</h1><p class="tag">Sign in to your account</p></div>
+  <form id="login-form" class="space-y-4">
+    <div><label class="tag">Email</label><input type="email" id="email" required placeholder="you@example.com"></div>
+    <div><label class="tag">Password</label><input type="password" id="password" required placeholder="••••••"></div>
+    <div id="login-error" class="error" style="display:none"></div>
+    <button type="submit" class="btn-primary w-full py-3 rounded text-sm">Sign In</button>
+  </form>
+  <div class="mt-6 tag text-center">No account? <a href="/signup" class="text-[var(--cyan)]">Create one</a></div>
+</div>
+<script>
+const emailInput=document.getElementById('email');
+const passwordInput=document.getElementById('password');
+const errorBox=document.getElementById('login-error');
+function validateEmail(v){return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);}
+function showError(msg){errorBox.textContent=msg;errorBox.style.display='block';}
+function clearError(){errorBox.style.display='none';errorBox.textContent='';}
+function validateForm(){
+  let ok=true;clearError();
+  if(!emailInput.value.trim()){showError('Email is required.');ok=false;}
+  else if(!validateEmail(emailInput.value.trim())){showError('Email format is invalid.');ok=false;}
+  if(!passwordInput.value){showError('Password is required.');ok=false;}
+  else if(passwordInput.value.length<6){showError('Password must be at least 6 characters.');ok=false;}
+  return ok;
+}
+document.getElementById('login-form').addEventListener('submit',function(e){
+  e.preventDefault();
+  if(!validateForm()) return;
+  const email=emailInput.value.trim();
+  const password=passwordInput.value;
+  fetch('/api/login',{method:'POST',body:JSON.stringify({email:email,password:password}),headers:{'Content-Type':'application/json'}})
+  .then(r=>r.json()).then(data=>{
+    if(data.ok){
+      localStorage.setItem('va_token', data.token);
+      window.location.href='/app';
+    } else {
+      showError((data.errors||[]).join(' '));
+    }
+  });
+});
+['input','blur'].forEach(evt=>{
+  emailInput.addEventListener(evt,()=>{if(errorBox.style.display!=='none')validateForm();});
+  passwordInput.addEventListener(evt,()=>{if(errorBox.style.display!=='none')validateForm();});
+});
+</script>
+</body></html>"""
+
     def landing_page(self):
         return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ApplyFlow</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -210,19 +278,34 @@ input[type=text],input[type=email]{background:var(--steel);border:1px solid var(
 <form id="signup-form" class="space-y-4">
 <div><label class="tag">Email</label><input type="email" id="email" required placeholder="you@example.com"></div>
 <div><label class="tag">Name</label><input type="text" id="name" placeholder="Your name"></div>
+<div><label class="tag">Password</label><input type="password" id="password" required placeholder="Min 6 characters"></div>
 <div><label class="tag">Select your skills</label><div class="mt-2">""" + skills_html + """</div></div>
 <button type="submit" class="btn-primary w-full py-3 rounded text-sm">Create Account</button>
 </form></div>
 <script>
-document.getElementById('signup-form').addEventListener('submit',function(e){e.preventDefault();
-const email=document.getElementById('email').value;const name=document.getElementById('name').value;
+const emailInput=document.getElementById('email');
+const passwordInput=document.getElementById('password');
+const nameInput=document.getElementById('name');
+function validateEmail(v){return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);}
+document.getElementById('signup-form').addEventListener('submit',function(e){
+e.preventDefault();
+const email=emailInput.value;
+const password=passwordInput.value;
+const name=nameInput.value;
+if(!validateEmail(email)){alert('Enter a valid email');return;}
+if(!password || password.length < 6){alert('Password must be at least 6 characters');return;}
 const skills=Array.from(document.querySelectorAll('.skill-box:checked')).map(cb=>cb.value);
 if(skills.length===0){alert('Select at least one skill');return;}
-fetch('/api/signup',{method:'POST',body:JSON.stringify({email:email,name:name,skills:skills}),headers:{'Content-Type':'application/json'}})
-.then(r=>r.json()).then(data=>{localStorage.setItem('va_email',email);window.location.href='/app';});
+fetch('/api/signup',{method:'POST',body:JSON.stringify({email:email,name:name,password:password,skills:skills}),headers:{'Content-Type':'application/json'}})
+.then(r=>r.json()).then(data=>{
+if(data && data.error){alert(data.error);return;}
+localStorage.setItem('va_token', data.token || '');
+window.location.href='/app';
 });
-</script></body></html>"""
-    
+});
+</script>
+</body></html>"""
+
     def dashboard_page(self):
         return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ApplyFlow Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -268,7 +351,12 @@ body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans
 <div id="tab-apps-content" style="display:none"><div id="app-list" class="grid gap-4"></div></div>
 </main>
 <script>
-let currentEmail=localStorage.getItem('va_email')||'';
+let currentToken=localStorage.getItem('va_token')||'';
+function authHeaders(){
+  const h={'Content-Type':'application/json'};
+  if(currentToken) h['Authorization']='Bearer '+currentToken;
+  return h;
+}
 function switchTab(tab){
 document.getElementById('tab-jobs-btn').className='tab-btn '+(tab==='jobs'?'tab-active':'tab-inactive');
 document.getElementById('tab-apps-btn').className='tab-btn '+(tab==='apps'?'tab-active':'tab-inactive');
@@ -276,19 +364,19 @@ document.getElementById('tab-jobs-content').style.display=tab==='jobs'?'block':'
 document.getElementById('tab-apps-content').style.display=tab==='apps'?'block':'none';
 if(tab==='apps')loadApplications();}
 function loadData(){
-if(!currentEmail){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
+if(!currentToken){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
 document.getElementById('login-prompt').style.display='none';document.getElementById('stats').style.display='grid';
-document.getElementById('user-name').textContent=currentEmail.split('@')[0];
-fetch('/api/jobs?email='+currentEmail).then(r=>r.json()).then(data=>{
+fetch('/api/jobs',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
 if(!data.logged_in){document.getElementById('login-prompt').style.display='block';return;}
 renderJobs(data.jobs);});
 fetch('/api/stats').then(r=>r.json()).then(s=>{
 document.getElementById('stat-jobs').textContent=s.total_jobs;
 document.getElementById('stat-apps').textContent=s.applications;
 document.getElementById('stat-users').textContent=s.users||0;
-document.getElementById('stat-tracked').textContent=s.tracked;});}
+document.getElementById('stat-tracked').textContent=s.tracked;});
+}
 function loadApplications(){
-fetch('/api/applications').then(r=>r.json()).then(data=>{
+fetch('/api/applications',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
 const apps=data.applications;
 if(!apps||apps.length===0){document.getElementById('app-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No applications generated.</div>';return;}
 let html='';
@@ -296,7 +384,8 @@ apps.forEach(app=>{
 const score=app.score||0;
 const sc=score>=70?'score-high':score>=40?'score-medium':'score-low';
 html+='<div class="panel p-5"><div class="flex justify-between items-start mb-3"><div><div class="font-mono-brand font-semibold">'+(app.job_title||app.title||'Application').substring(0,60)+'</div><div class="text-sm text-[var(--manifest-dim)]">'+(app.generated_by||'')+'</div></div><span class="tag '+sc+'" style="padding:2px 10px;border-radius:20px">'+score+'/100</span></div><div class="panel p-4 text-sm text-[var(--manifest-dim)]" style="white-space:pre-wrap">'+(app.text||'').substring(0,400)+'...</div></div>';});
-document.getElementById('app-list').innerHTML=html;});}
+document.getElementById('app-list').innerHTML=html;});
+}
 function renderJobs(jobs){
 if(!jobs||jobs.length===0){document.getElementById('job-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No jobs.</div>';return;}
 let html='';
@@ -315,6 +404,7 @@ loadData();
 print("ApplyFlow running at http://localhost:8000 (Supabase backend)")
 PORT = int(os.environ.get('PORT', 8000))
 start_scheduler()
+ensure_default_admin()
 server = HTTPServer(('0.0.0.0', PORT), Handler)
 print(f'Running on 0.0.0.0:{PORT}', flush=True)
 server.serve_forever()
