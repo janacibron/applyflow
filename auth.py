@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-BASE = Path('C:/va-pipeline')
+BASE = Path(__file__).resolve().parent
 USERS_FILE = BASE / 'data' / 'users.json'
 SESSIONS_FILE = BASE / 'data' / 'sessions.json'
 LOGIN_HISTORY_FILE = BASE / 'data' / 'login_history.jsonl'
@@ -24,11 +24,13 @@ EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 # Optional Supabase backend
 SUPABASE_ENABLED = False
 _supabase = None
+_supabase_checked = False
 
 def _init_supabase():
-    global SUPABASE_ENABLED, _supabase
-    if SUPABASE_ENABLED:
+    global SUPABASE_ENABLED, _supabase, _supabase_checked
+    if _supabase_checked:
         return
+    _supabase_checked = True
     try:
         # Load .env from project root if present
         _env_path = Path(__file__).resolve().parent / '.env'
@@ -43,9 +45,13 @@ def _init_supabase():
         if SUPABASE_URL and SUPABASE_SECRET_KEY:
             _supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
             SUPABASE_ENABLED = True
-    except Exception:
+            print(f"[auth] Supabase enabled: {SUPABASE_URL}", flush=True)
+        else:
+            print("[auth] Supabase disabled: missing URL or secret key", flush=True)
+    except Exception as e:
         SUPABASE_ENABLED = False
         _supabase = None
+        print(f"[auth] Supabase init failed: {e}", flush=True)
 
 def _now():
     return datetime.utcnow().isoformat() + 'Z'
@@ -173,14 +179,15 @@ def create_user(email: str, password: str, name: str = '', skills=None):
                 'skills': skills or [],
                 'password_hash': _hash_password(password),
                 'role': 'user',
-                'login_count': 0
+                'login_count': 0,
+                'last_login_at': None
             }
             res = _supabase.table('users').insert(payload).execute()
             if res.data:
                 return res.data[0]
             return None
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[auth] create_user Supabase error: {e}", flush=True)
     users = _load_users()
     if get_user(email):
         return None
@@ -272,8 +279,8 @@ def login_user(email: str, password: str, ip: str = '', user_agent: str = ''):
                 'last_login_at': now
             }
             return {'ok': True, 'errors': [], 'token': token, 'user': user_payload}
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[auth] login_user Supabase error: {e}", flush=True)
 
     # Local fallback
     sessions = _load_sessions()

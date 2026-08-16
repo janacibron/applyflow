@@ -45,13 +45,11 @@
       if(skills.length===0){alert('Select at least one skill');return;}
       fetch('/api/signup',{method:'POST',body:JSON.stringify({email:email,name:name,password:password,skills:skills}),headers:{'Content-Type':'application/json'}})
       .then(r=>r.json()).then(data=>{
-        if(!data){alert('Signup failed. Try again.');return;}
-        if(data && data.error){alert(data.error);return;}
-        if(!data){alert('Signup failed. Try again.');return;}
+        if(!data || data.ok === false){alert((data && data.error) || 'Signup failed. Try again.');return;}
         localStorage.setItem('va_email', email);
         alert('Account created! Please login.');
         window.location.href='/login';
-      });
+      }).catch(()=>{alert('Signup failed. Try again.');});
     });
   </script>
 </body>

@@ -16,16 +16,21 @@ if _env_path.exists():
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Optional Supabase init
-SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
-SUPABASE_SECRET_KEY = os.environ.get('SUPABASE_SECRET_KEY', '')
+# Optional Supabase init (single source of truth: supabase_config.py)
+try:
+    from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
+except Exception:
+    SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+    SUPABASE_SECRET_KEY = os.environ.get('SUPABASE_SECRET_KEY', '')
 supabase = None
 try:
     if SUPABASE_URL and SUPABASE_SECRET_KEY:
         from supabase import create_client
         supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
-except Exception:
+        print(f"[app] Supabase client initialized: {SUPABASE_URL}", flush=True)
+except Exception as e:
     supabase = None
+    print(f"[app] Supabase client init failed: {e}", flush=True)
 
 # Ensure governance module is importable
 try:
@@ -126,6 +131,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.serve_json(self.get_stats())
         elif path == '/api/governance':
             self.serve_json({"events": _read_events(200)})
+        elif path == '/api/me':
+            self.serve_json(self.get_me())
+        elif path == '/logout':
+            self.send_response(302)
+            self.send_header('Location', '/login')
+            self.send_header('Set-Cookie', 'va_token=; Path=/; Max-Age=0')
+            self.end_headers()
+            return
         else:
             self.send_response(404)
             self.end_headers()
@@ -137,7 +150,11 @@ class Handler(SimpleHTTPRequestHandler):
         except: data = parse_qs(body)
         path = urlparse(self.path).path
         if path == '/api/signup':
-            self.serve_json(create_user(data.get('email',''), data.get('password',''), data.get('name',''), data.get('skills',[])))
+            result = create_user(data.get('email',''), data.get('password',''), data.get('name',''), data.get('skills',[]))
+            if result is None:
+                self.serve_json({"ok": False, "error": "Email already registered or signup failed"})
+            else:
+                self.serve_json({"ok": True, "user": result})
         elif path == '/api/login':
             ip = self.headers.get('X-Forwarded-For', self.client_address[0] if hasattr(self, 'client_address') else '')
             ua = self.headers.get('User-Agent', '')
@@ -220,13 +237,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode())
 
     def get_jobs(self, params):
-        user = None
-        auth = self.headers.get('Authorization', '')
-        if auth.startswith('Bearer '):
-            token = auth.split(' ', 1)[1].strip()
-            session = get_session(token)
-            if session:
-                user = get_user(session['email'])
+        user = self._current_user()
         if not user:
             email = params.get('email', [''])[0]
             user = get_user(email)
@@ -240,6 +251,15 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"Supabase jobs error: {e}", flush=True)
                 jobs = []
+
+        if not jobs:
+            jobs_file = DATA / 'jobs.json'
+            if jobs_file.exists():
+                try:
+                    raw = json.loads(jobs_file.read_text(encoding='utf-8'))
+                    jobs = raw.get('jobs', raw) if isinstance(raw, dict) else raw
+                except Exception:
+                    jobs = []
 
         for job in jobs:
             scoring = score_job_for_user(job, user.get('skills', []))
@@ -287,6 +307,24 @@ class Handler(SimpleHTTPRequestHandler):
                 if token and get_session(token):
                     return token
         return None
+
+    def _current_user(self):
+        token = self._current_token()
+        if not token:
+            return None
+        session = get_session(token)
+        if not session:
+            return None
+        email = session.get('email')
+        if not email:
+            return None
+        return get_user(email)
+
+    def get_me(self):
+        user = self._current_user()
+        if not user:
+            return {"logged_in": False}
+        return {"logged_in": True, "user": {"email": user.get('email'), "name": user.get('name'), "skills": user.get('skills', [])}}
 
     def _skills_html(self):
         return "".join(f'<label class="skill-check"><input type="checkbox" value="{s}" class="skill-box"> {s}</label>' for s in SKILL_OPTIONS)

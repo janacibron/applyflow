@@ -16,7 +16,7 @@
     .btn-apply{background:var(--cyan);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;text-decoration:none;}
     .score-high{background:rgba(79,209,197,.15);color:var(--cyan);}
     .score-medium{background:rgba(242,169,59,.15);color:var(--amber);}
-    .score-low{background:rgba(226,87,76,.15);color:var(--red);}
+    .score-low{background:rgba(226,87,76,.15);color:#E2574C;}
     .tab-btn{padding:8px 16px;border-radius:.5rem;font-family:'IBM Plex Mono',monospace;font-size:.8rem;cursor:pointer;transition:all .3s;}
     .tab-active{background:var(--amber);color:var(--graphite);font-weight:600;}
     .tab-inactive{background:transparent;border:1px solid var(--steel-line);color:var(--manifest-dim);}
@@ -27,7 +27,11 @@
 <body>
   <header class="sticky top-0 z-40 backdrop-blur bg-[var(--graphite)]/85 divider"><div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
     <a href="/" class="font-mono-brand font-semibold">APPLYFLOW</a>
-    <div class="flex items-center gap-4"><span id="user-name" class="tag">Guest</span><a href="/signup" class="btn-primary text-xs px-4 py-2 rounded" id="signup-btn">Sign Up</a><a href="/logout" class="btn-ghost text-xs px-4 py-2 rounded" id="logout-btn" style="display:none">Sign Out</a></div>
+    <div class="flex items-center gap-4">
+      <span id="user-name" class="tag">Guest</span>
+      <a href="/signup" class="btn-primary text-xs px-4 py-2 rounded" id="signup-btn">Sign Up</a>
+      <a href="#" onclick="logout(); return false;" class="btn-ghost text-xs px-4 py-2 rounded" id="logout-btn" style="display:none">Sign Out</a>
+    </div>
   </div></header>
   <main class="max-w-6xl mx-auto px-6 py-12">
     <div class="flex gap-3 mb-8">
@@ -49,11 +53,58 @@
     <div id="tab-apps-content" style="display:none"><div id="app-list" class="grid gap-4"></div></div>
   </main>
   <script>
-    let currentToken=localStorage.getItem('va_token')||'';
+    // Token: prefer localStorage, fall back to ?token= query param, then cookie (server-side)
+    let currentToken = localStorage.getItem('va_token') || '';
+    if (!currentToken) {
+      const qs = new URLSearchParams(window.location.search).get('token');
+      if (qs) { currentToken = qs; localStorage.setItem('va_token', qs); }
+    }
+    let currentUser = null;
+    try { currentUser = JSON.parse(localStorage.getItem('va_user') || 'null'); } catch(e) { currentUser = null; }
+
     function authHeaders(){
       const h={'Content-Type':'application/json'};
       if(currentToken) h['Authorization']='Bearer '+currentToken;
       return h;
+    }
+    function renderUser(){
+      const nameEl=document.getElementById('user-name');
+      const signupBtn=document.getElementById('signup-btn');
+      const logoutBtn=document.getElementById('logout-btn');
+      if(currentToken){
+        nameEl.textContent = (currentUser && currentUser.name) ? currentUser.name : ((currentUser && currentUser.email) ? currentUser.email : 'Signed in');
+        signupBtn.style.display='none';
+        logoutBtn.style.display='inline-block';
+      } else {
+        nameEl.textContent='Guest';
+        signupBtn.style.display='inline-block';
+        logoutBtn.style.display='none';
+      }
+    }
+    function loadMe(){
+      if(!currentToken){ renderUser(); return; }
+      fetch('/api/me',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
+        if(data && data.logged_in && data.user){
+          currentUser=data.user;
+          localStorage.setItem('va_user', JSON.stringify(data.user));
+        }
+        renderUser();
+      }).catch(()=>renderUser());
+    }
+    function logout(){
+      const token=currentToken;
+      const done=()=>{
+        localStorage.removeItem('va_token');
+        localStorage.removeItem('va_user');
+        document.cookie='va_token=; path=/; Max-Age=0';
+        window.location.href='/login';
+      };
+      if(token){
+        fetch('/api/logout',{method:'POST',body:JSON.stringify({token:token}),headers:{'Content-Type':'application/json'}})
+          .catch(()=>{}).finally(done);
+      } else {
+        done();
+      }
     }
     function switchTab(tab){
       document.getElementById('tab-jobs-btn').className='tab-btn '+(tab==='jobs'?'tab-active':'tab-inactive');
@@ -66,15 +117,15 @@
       if(!currentToken){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
       document.getElementById('login-prompt').style.display='none';document.getElementById('stats').style.display='grid';
       fetch('/api/jobs',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
-        if(!data.logged_in){document.getElementById('login-prompt').style.display='block';return;}
+        if(!data || !data.logged_in){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
         renderJobs(data.jobs);
-      });
+      }).catch(()=>{});
       fetch('/api/stats').then(r=>r.json()).then(s=>{
         document.getElementById('stat-jobs').textContent=s.total_jobs;
         document.getElementById('stat-apps').textContent=s.applications;
         document.getElementById('stat-users').textContent=s.users||0;
         document.getElementById('stat-tracked').textContent=s.tracked;
-      });
+      }).catch(()=>{});
     }
     function loadApplications(){
       fetch('/api/applications',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
@@ -87,7 +138,7 @@
           html+='<div class="panel p-5"><div class="flex justify-between items-start mb-3"><div><div class="font-mono-brand font-semibold">'+(app.job_title||app.title||'Application').substring(0,60)+'</div><div class="text-sm text-[var(--manifest-dim)]">'+(app.generated_by||'')+'</div></div><span class="tag '+sc+'" style="padding:2px 10px;border-radius:20px">'+score+'/100</span></div><div class="panel p-4 text-sm text-[var(--manifest-dim)]" style="white-space:pre-wrap">'+(app.text||'').substring(0,400)+'...</div></div>';
         });
         document.getElementById('app-list').innerHTML=html;
-      });
+      }).catch(()=>{});
     }
     function renderJobs(jobs){
       if(!jobs||jobs.length===0){document.getElementById('job-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No jobs.</div>';return;}
@@ -103,8 +154,9 @@
       document.getElementById('job-list').innerHTML=html;
     }
     function toggleDesc(i){const el=document.getElementById('desc-'+i);el.className=el.className==='desc-hidden'?'desc-shown':'desc-hidden';}
-    document.getElementById('logout-btn').addEventListener('click', logout);
-loadData();
+    renderUser();
+    loadMe();
+    loadData();
   </script>
 </body>
 </html>
