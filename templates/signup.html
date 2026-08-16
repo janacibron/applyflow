@@ -47,8 +47,10 @@
       .then(r=>r.json()).then(data=>{
         if(!data){alert('Signup failed. Try again.');return;}
         if(data && data.error){alert(data.error);return;}
-        localStorage.setItem('va_token', data.token || '');
-        window.location.href='/dashboard';
+        if(!data){alert('Signup failed. Try again.');return;}
+        localStorage.setItem('va_email', email);
+        alert('Account created! Please login.');
+        window.location.href='/login';
       });
     });
   </script>
