@@ -59,7 +59,7 @@ def score_job_for_user(job, user_skills):
     rate = job.get('rate','') or ''
     if '$' in rate:
         import re
-        amounts = re.findall(r'\\$[\d,]+', rate)
+        amounts = re.findall(r'\$[\d,]+', rate)
         if amounts:
             try:
                 rates = [float(a.replace('$','').replace(',','')) for a in amounts]
@@ -77,11 +77,34 @@ class Handler(SimpleHTTPRequestHandler):
         if path in ['/', '/index.html']:
             self.serve_html(self.landing_page())
         elif path == '/login':
-            self.serve_html(self.login_page())
-        elif path == '/app':
-            self.serve_html(self.dashboard_page())
+            if self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/dashboard')
+                self.end_headers()
+                return
+            html = self.render_template('login.html')
+            if html is not None:
+                self.serve_html(html)
+        elif path == '/dashboard':
+            if not self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.end_headers()
+                return
+            html = self.render_template('dashboard.html')
+            if html is not None:
+                self.serve_html(html)
         elif path == '/signup':
-            self.serve_html(self.signup_page())
+            if self._current_token():
+                self.send_response(302)
+                self.send_header('Location', '/dashboard')
+                self.end_headers()
+                return
+            html = self.render_template('signup.html', {'skills_html': self._skills_html()})
+            if html is not None:
+                self.serve_html(html)
+        elif path.startswith('/static/'):
+            self.serve_static(path[len('/static/'):])
         elif path == '/api/jobs':
             self.serve_json(self.get_jobs(parse_qs(urlparse(self.path).query)))
         elif path == '/api/applications':
@@ -91,7 +114,8 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == '/api/governance':
             self.serve_json({"events": _read_events(200)})
         else:
-            self.send_response(404); self.end_headers()
+            self.send_response(404)
+            self.end_headers()
     
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -116,7 +140,44 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
         self.wfile.write(html.encode('utf-8'))
-    
+
+    def render_template(self, name, context=None):
+        path = DATA.parent / 'templates' / name
+        if not path.exists():
+            self.send_response(404)
+            self.end_headers()
+            return None
+        html = path.read_text(encoding='utf-8')
+        if context:
+            for key, value in context.items():
+                html = html.replace('{{ ' + key + ' }}', str(value))
+        return html
+
+    def serve_static(self, rel_path):
+        safe = rel_path.replace('/', os.sep)
+        if safe.startswith(os.sep) or '..' in safe:
+            self.send_response(400)
+            self.end_headers()
+            return None
+        path = DATA.parent / safe
+        if not path.exists() or not path.is_file():
+            self.send_response(404)
+            self.end_headers()
+            return None
+        mime = {
+            '.css': 'text/css',
+            '.js': 'application/javascript',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.svg': 'image/svg+xml',
+        }.get(path.suffix.lower(), 'application/octet-stream')
+        self.send_response(200)
+        self.send_header('Content-type', mime)
+        self.end_headers()
+        data = path.read_bytes()
+        self.wfile.write(data)
+        return None
+
     def serve_json(self, data):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
@@ -136,11 +197,13 @@ class Handler(SimpleHTTPRequestHandler):
             user = get_user(email)
         if not user: return {"jobs":[], "logged_in":False}
         
-        try:
-            result = supabase.table('jobs').select('*').execute()
-            jobs = result.data or []
-        except:
-            jobs = []
+        jobs = []
+        if supabase:
+            try:
+                result = supabase.table('jobs').select('*').execute()
+                jobs = result.data or []
+            except:
+                pass
         
         for job in jobs:
             scoring = score_job_for_user(job, user.get('skills', []))
@@ -151,11 +214,13 @@ class Handler(SimpleHTTPRequestHandler):
         return {"jobs":jobs, "logged_in":True, "user_skills":user.get('skills',[])}
     
     def get_applications(self):
-        try:
-            result = supabase.table('applications').select('*').order('created_at', desc=True).execute()
-            apps = result.data or []
-        except:
-            apps = []
+        apps = []
+        if supabase:
+            try:
+                result = supabase.table('applications').select('*').order('created_at', desc=True).execute()
+                apps = result.data or []
+            except:
+                pass
         return {"applications": apps, "total": len(apps)}
     
     def get_stats(self):
@@ -168,243 +233,39 @@ class Handler(SimpleHTTPRequestHandler):
         return {"total_jobs": jobs_count, "applications": apps_count, "tracked": 0, "responses": 0, "users": users_count}
     
     def log_message(self, *args): pass
-    
-    def login_page(self):
-        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ApplyFlow - Login</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script><style>
-:root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
-body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
-.panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
-.tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
-.font-mono-brand{font-family:'IBM Plex Mono',monospace;}
-.btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;cursor:pointer;border:none;}
-input[type=text],input[type=email],input[type=password]{background:var(--steel);border:1px solid var(--steel-line);border-radius:.5rem;padding:10px 15px;color:var(--manifest);width:100%;outline:none;}
-.error{color:#E2574C;font-size:.8rem;}
-</style></head><body>
-<div class="panel p-8 max-w-md w-full">
-  <div class="text-center mb-8"><h1 class="font-mono-brand font-bold text-2xl mb-2">APPLYFLOW</h1><p class="tag">Sign in to your account</p></div>
-  <form id="login-form" class="space-y-4">
-    <div><label class="tag">Email</label><input type="email" id="email" required placeholder="you@example.com"></div>
-    <div><label class="tag">Password</label><input type="password" id="password" required placeholder="••••••"></div>
-    <div id="login-error" class="error" style="display:none"></div>
-    <button type="submit" class="btn-primary w-full py-3 rounded text-sm">Sign In</button>
-  </form>
-  <div class="mt-6 tag text-center">No account? <a href="/signup" class="text-[var(--cyan)]">Create one</a></div>
-</div>
-<script>
-const emailInput=document.getElementById('email');
-const passwordInput=document.getElementById('password');
-const errorBox=document.getElementById('login-error');
-function validateEmail(v){return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);}
-function showError(msg){errorBox.textContent=msg;errorBox.style.display='block';}
-function clearError(){errorBox.style.display='none';errorBox.textContent='';}
-function validateForm(){
-  let ok=true;clearError();
-  if(!emailInput.value.trim()){showError('Email is required.');ok=false;}
-  else if(!validateEmail(emailInput.value.trim())){showError('Email format is invalid.');ok=false;}
-  if(!passwordInput.value){showError('Password is required.');ok=false;}
-  else if(passwordInput.value.length<6){showError('Password must be at least 6 characters.');ok=false;}
-  return ok;
-}
-document.getElementById('login-form').addEventListener('submit',function(e){
-  e.preventDefault();
-  if(!validateForm()) return;
-  const email=emailInput.value.trim();
-  const password=passwordInput.value;
-  fetch('/api/login',{method:'POST',body:JSON.stringify({email:email,password:password}),headers:{'Content-Type':'application/json'}})
-  .then(r=>r.json()).then(data=>{
-    if(data.ok){
-      localStorage.setItem('va_token', data.token);
-      window.location.href='/app';
-    } else {
-      showError((data.errors||[]).join(' '));
-    }
-  });
-});
-['input','blur'].forEach(evt=>{
-  emailInput.addEventListener(evt,()=>{if(errorBox.style.display!=='none')validateForm();});
-  passwordInput.addEventListener(evt,()=>{if(errorBox.style.display!=='none')validateForm();});
-});
-</script>
-</body></html>"""
+
+    def _current_token(self):
+        auth = self.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            token = auth.split(' ', 1)[1].strip()
+            if token and get_session(token):
+                return token
+        cookie = self.headers.get('Cookie', '')
+        for part in cookie.split(';'):
+            part = part.strip()
+            if part.startswith('va_token='):
+                token = part.split('=', 1)[1]
+                if token and get_session(token):
+                    return token
+        return None
+
+    def _skills_html(self):
+        return "".join(f'<label class="skill-check"><input type="checkbox" value="{s}" class="skill-box"> {s}</label>' for s in SKILL_OPTIONS)
 
     def landing_page(self):
-        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ApplyFlow</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script><style>
-:root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
-body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;}
-.font-mono-brand{font-family:'IBM Plex Mono',monospace;}
-.tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
-.panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
-.btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;}
-.btn-ghost{border:1px solid var(--steel-line);color:var(--manifest);font-family:'IBM Plex Mono',monospace;}
-.divider{border-top:1px solid var(--steel-line);}
-</style></head><body>
-<header class="sticky top-0 z-40 backdrop-blur bg-[var(--graphite)]/85 divider"><div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-<a href="/" class="font-mono-brand font-semibold">APPLYFLOW</a>
-<nav class="flex items-center gap-6 tag"><a href="/signup" class="hover:text-[var(--cyan)]">Sign Up</a><a href="/app" class="hover:text-[var(--cyan)]">Dashboard</a></nav>
-<a href="/signup" class="btn-primary text-xs px-4 py-2 rounded">Get Started</a>
-</div></header>
-<section class="max-w-6xl mx-auto px-6 pt-20 pb-16 grid md:grid-cols-2 gap-12 items-center">
-<div><p class="tag mb-4">Supabase-powered VA job pipeline</p>
-<h1 class="font-mono-brand font-semibold text-4xl md:text-5xl leading-tight">Jobs matched to YOUR skills.</h1>
-<p class="mt-6 text-lg text-[var(--manifest-dim)] max-w-md">Select your skills. We scrape, score, and generate applications tailored to you.</p>
-<div class="mt-8 flex gap-4"><a href="/signup" class="btn-primary px-6 py-3 rounded text-sm">Set Up Profile</a><a href="/app" class="btn-ghost px-6 py-3 rounded text-sm">View Dashboard</a></div></div>
-<div class="panel p-5 font-mono-brand text-[13px]"><div class="flex justify-between mb-3"><span class="tag">supabase.log</span><span class="tag text-[var(--cyan)]">connected</span></div>
-<div class="space-y-1"><div>[DB] 150 jobs in Supabase</div><div>[USER] Personalized scoring</div><div class="text-[var(--amber)]">[MATCH] Top jobs found</div></div></div>
-</section>
-<footer class="divider"><div class="max-w-6xl mx-auto px-6 py-10 text-center tag">ApplyFlow 2026</div></footer>
-</body></html>"""
-    
+        return self.render_template('landing.html') or ''
+
     def signup_page(self):
-        skills_html = "".join(f'<label class="skill-check"><input type="checkbox" value="{s}" class="skill-box"> {s}</label>' for s in SKILL_OPTIONS)
-        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ApplyFlow - Sign Up</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script><style>
-:root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
-body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
-.panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
-.tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
-.font-mono-brand{font-family:'IBM Plex Mono',monospace;}
-.btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;cursor:pointer;border:none;}
-.skill-check{display:inline-block;margin:4px;padding:6px 12px;background:var(--steel);border-radius:20px;font-size:.85em;cursor:pointer;transition:all .2s;}
-.skill-check:has(input:checked){background:var(--cyan);color:var(--graphite);font-weight:600;}
-.skill-box{display:none;}
-input[type=text],input[type=email]{background:var(--steel);border:1px solid var(--steel-line);border-radius:.5rem;padding:10px 15px;color:var(--manifest);width:100%;outline:none;}
-</style></head><body>
-<div class="panel p-8 max-w-lg w-full"><div class="text-center mb-8"><h1 class="font-mono-brand font-bold text-2xl mb-2">APPLYFLOW</h1><p class="tag">Set up your profile</p></div>
-<form id="signup-form" class="space-y-4">
-<div><label class="tag">Email</label><input type="email" id="email" required placeholder="you@example.com"></div>
-<div><label class="tag">Name</label><input type="text" id="name" placeholder="Your name"></div>
-<div><label class="tag">Password</label><input type="password" id="password" required placeholder="Min 6 characters"></div>
-<div><label class="tag">Select your skills</label><div class="mt-2">""" + skills_html + """</div></div>
-<button type="submit" class="btn-primary w-full py-3 rounded text-sm">Create Account</button>
-</form></div>
-<script>
-const emailInput=document.getElementById('email');
-const passwordInput=document.getElementById('password');
-const nameInput=document.getElementById('name');
-function validateEmail(v){return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);}
-document.getElementById('signup-form').addEventListener('submit',function(e){
-e.preventDefault();
-const email=emailInput.value;
-const password=passwordInput.value;
-const name=nameInput.value;
-if(!validateEmail(email)){alert('Enter a valid email');return;}
-if(!password || password.length < 6){alert('Password must be at least 6 characters');return;}
-const skills=Array.from(document.querySelectorAll('.skill-box:checked')).map(cb=>cb.value);
-if(skills.length===0){alert('Select at least one skill');return;}
-fetch('/api/signup',{method:'POST',body:JSON.stringify({email:email,name:name,password:password,skills:skills}),headers:{'Content-Type':'application/json'}})
-.then(r=>r.json()).then(data=>{
-if(data && data.error){alert(data.error);return;}
-localStorage.setItem('va_token', data.token || '');
-window.location.href='/app';
-});
-});
-</script>
-</body></html>"""
+        return self.render_template('signup.html', {'skills_html': self._skills_html()}) or ''
 
     def dashboard_page(self):
-        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ApplyFlow Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script><style>
-:root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
-body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;}
-.font-mono-brand{font-family:'IBM Plex Mono',monospace;}
-.tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
-.panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
-.btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;}
-.btn-ghost{border:1px solid var(--steel-line);color:var(--manifest);font-family:'IBM Plex Mono',monospace;}
-.btn-apply{background:var(--cyan);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;text-decoration:none;}
-.score-high{background:rgba(79,209,197,.15);color:var(--cyan);}
-.score-medium{background:rgba(242,169,59,.15);color:var(--amber);}
-.score-low{background:rgba(226,87,76,.15);color:var(--red);}
-.tab-btn{padding:8px 16px;border-radius:.5rem;font-family:'IBM Plex Mono',monospace;font-size:.8rem;cursor:pointer;transition:all .3s;}
-.tab-active{background:var(--amber);color:var(--graphite);font-weight:600;}
-.tab-inactive{background:transparent;border:1px solid var(--steel-line);color:var(--manifest-dim);}
-.desc-hidden{display:none;}
-.desc-shown{display:block;margin-top:10px;padding:12px;background:var(--steel);border-radius:.5rem;font-size:.85em;color:var(--manifest-dim);white-space:pre-wrap;line-height:1.5;max-height:300px;overflow-y:auto;}
-</style></head><body>
-<header class="sticky top-0 z-40 backdrop-blur bg-[var(--graphite)]/85 divider"><div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-<a href="/" class="font-mono-brand font-semibold">APPLYFLOW</a>
-<div class="flex items-center gap-4"><span id="user-name" class="tag">Guest</span><a href="/signup" class="btn-primary text-xs px-4 py-2 rounded">Sign Up</a></div>
-</div></header>
-<main class="max-w-6xl mx-auto px-6 py-12">
-<div class="flex gap-3 mb-8">
-<button class="tab-btn tab-active" id="tab-jobs-btn" onclick="switchTab('jobs')">Jobs</button>
-<button class="tab-btn tab-inactive" id="tab-apps-btn" onclick="switchTab('apps')">Applications</button>
-</div>
-<div id="login-prompt" class="panel p-8 text-center mb-8" style="display:none">
-<h2 class="font-mono-brand font-semibold text-xl mb-3">Set up your profile</h2>
-<p class="text-[var(--manifest-dim)] mb-6">Select your skills to get personalized job matches.</p>
-<a href="/signup" class="btn-primary px-8 py-3 rounded text-sm inline-block">Set Up Profile</a>
-</div>
-<div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" style="display:none">
-<div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--cyan)]" id="stat-jobs">0</div><div class="tag mt-1">Jobs</div></div>
-<div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--amber)]" id="stat-apps">0</div><div class="tag mt-1">Applications</div></div>
-<div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--cyan)]" id="stat-users">0</div><div class="tag mt-1">Users</div></div>
-<div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--amber)]" id="stat-tracked">0</div><div class="tag mt-1">Tracked</div></div>
-</div>
-<div id="tab-jobs-content"><div id="job-list" class="grid gap-4"></div></div>
-<div id="tab-apps-content" style="display:none"><div id="app-list" class="grid gap-4"></div></div>
-</main>
-<script>
-let currentToken=localStorage.getItem('va_token')||'';
-function authHeaders(){
-  const h={'Content-Type':'application/json'};
-  if(currentToken) h['Authorization']='Bearer '+currentToken;
-  return h;
-}
-function switchTab(tab){
-document.getElementById('tab-jobs-btn').className='tab-btn '+(tab==='jobs'?'tab-active':'tab-inactive');
-document.getElementById('tab-apps-btn').className='tab-btn '+(tab==='apps'?'tab-active':'tab-inactive');
-document.getElementById('tab-jobs-content').style.display=tab==='jobs'?'block':'none';
-document.getElementById('tab-apps-content').style.display=tab==='apps'?'block':'none';
-if(tab==='apps')loadApplications();}
-function loadData(){
-if(!currentToken){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
-document.getElementById('login-prompt').style.display='none';document.getElementById('stats').style.display='grid';
-fetch('/api/jobs',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
-if(!data.logged_in){document.getElementById('login-prompt').style.display='block';return;}
-renderJobs(data.jobs);});
-fetch('/api/stats').then(r=>r.json()).then(s=>{
-document.getElementById('stat-jobs').textContent=s.total_jobs;
-document.getElementById('stat-apps').textContent=s.applications;
-document.getElementById('stat-users').textContent=s.users||0;
-document.getElementById('stat-tracked').textContent=s.tracked;});
-}
-function loadApplications(){
-fetch('/api/applications',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
-const apps=data.applications;
-if(!apps||apps.length===0){document.getElementById('app-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No applications generated.</div>';return;}
-let html='';
-apps.forEach(app=>{
-const score=app.score||0;
-const sc=score>=70?'score-high':score>=40?'score-medium':'score-low';
-html+='<div class="panel p-5"><div class="flex justify-between items-start mb-3"><div><div class="font-mono-brand font-semibold">'+(app.job_title||app.title||'Application').substring(0,60)+'</div><div class="text-sm text-[var(--manifest-dim)]">'+(app.generated_by||'')+'</div></div><span class="tag '+sc+'" style="padding:2px 10px;border-radius:20px">'+score+'/100</span></div><div class="panel p-4 text-sm text-[var(--manifest-dim)]" style="white-space:pre-wrap">'+(app.text||'').substring(0,400)+'...</div></div>';});
-document.getElementById('app-list').innerHTML=html;});
-}
-function renderJobs(jobs){
-if(!jobs||jobs.length===0){document.getElementById('job-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No jobs.</div>';return;}
-let html='';
-jobs.slice(0,30).forEach((job,index)=>{
-const sc=job.user_score>=70?'score-high':job.user_score>=40?'score-medium':'score-low';
-const skills=(job.user_matched_skills||[]).slice(0,4).map(s=>'<span class="tag" style="margin-right:4px">'+s+'</span>').join('');
-const url=job.url||'';
-const applyBtn=url?'<a href="'+url+'" target="_blank" class="btn-apply text-xs px-4 py-2 rounded">Apply Now</a>':'';
-const desc=(job.description||'').replace(/'/g,"\\'").substring(0,2000);
-html+='<div class="panel p-5"><div class="flex justify-between items-start mb-3"><div><div class="font-mono-brand font-semibold">'+job.title.substring(0,60)+'</div><div class="text-sm text-[var(--manifest-dim)]">'+(job.company||'')+' &bull; '+(job.platform||'')+'</div></div><span class="tag '+sc+'" style="padding:2px 10px;border-radius:20px">'+(job.user_score||0)+'/100</span></div><div class="mb-3">'+skills+'</div><div class="flex gap-2">'+applyBtn+'<button class="btn-ghost text-xs px-3 py-2 rounded" onclick="toggleDesc('+index+')">View Description</button></div><div id="desc-'+index+'" class="desc-hidden">'+desc+'</div></div>';});
-document.getElementById('job-list').innerHTML=html;}
-function toggleDesc(i){const el=document.getElementById('desc-'+i);el.className=el.className==='desc-hidden'?'desc-shown':'desc-hidden';}
-loadData();
-</script></body></html>"""
+        return self.render_template('dashboard.html') or ''
 
 print("ApplyFlow running at http://localhost:8000 (Supabase backend)")
 PORT = int(os.environ.get('PORT', 8000))
 start_scheduler()
 ensure_default_admin()
-server = HTTPServer(('0.0.0.0', PORT), Handler)
-print(f'Running on 0.0.0.0:{PORT}', flush=True)
-server.serve_forever()
+if __name__ == '__main__':
+    server = HTTPServer(('0.0.0.0', PORT), Handler)
+    print(f'Running on 0.0.0.0:{PORT}', flush=True)
+    server.serve_forever()

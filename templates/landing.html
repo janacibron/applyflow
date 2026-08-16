@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ApplyFlow</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com/"></script>
+  <style>
+    :root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
+    body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;}
+    .font-mono-brand{font-family:'IBM Plex Mono',monospace;}
+    .tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
+    .panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
+    .btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;}
+    .btn-ghost{border:1px solid var(--steel-line);color:var(--manifest);font-family:'IBM Plex Mono',monospace;}
+    .divider{border-top:1px solid var(--steel-line);}
+  </style>
+</head>
+<body>
+  <header class="sticky top-0 z-40 backdrop-blur bg-[var(--graphite)]/85 divider"><div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+    <a href="/" class="font-mono-brand font-semibold">APPLYFLOW</a>
+    <nav class="flex items-center gap-6 tag"><a href="/signup" class="hover:text-[var(--cyan)]">Sign Up</a><a href="/app" class="hover:text-[var(--cyan)]">Dashboard</a></nav>
+    <a href="/signup" class="btn-primary text-xs px-4 py-2 rounded">Get Started</a>
+  </div></header>
+  <section class="max-w-6xl mx-auto px-6 pt-20 pb-16 grid md:grid-cols-2 gap-12 items-center">
+    <div><p class="tag mb-4">Supabase-powered VA job pipeline</p>
+    <h1 class="font-mono-brand font-semibold text-4xl md:text-5xl leading-tight">Jobs matched to YOUR skills.</h1>
+    <p class="mt-6 text-lg text-[var(--manifest-dim)] max-w-md">Select your skills. We scrape, score, and generate applications tailored to you.</p>
+    <div class="mt-8 flex gap-4"><a href="/signup" class="btn-primary px-6 py-3 rounded text-sm">Set Up Profile</a><a href="/app" class="btn-ghost px-6 py-3 rounded text-sm">View Dashboard</a></div></div>
+    <div class="panel p-5 font-mono-brand text-[13px]"><div class="flex justify-between mb-3"><span class="tag">supabase.log</span><span class="tag text-[var(--cyan)]">connected</span></div>
+    <div class="space-y-1"><div>[DB] 150 jobs in Supabase</div><div>[USER] Personalized scoring</div><div class="text-[var(--amber)]">[MATCH] Top jobs found</div></div></div>
+  </section>
+  <footer class="divider"><div class="max-w-6xl mx-auto px-6 py-10 text-center tag">ApplyFlow 2026</div></footer>
+</body>
+</html>

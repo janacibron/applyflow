@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ApplyFlow Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com/"></script>
+  <style>
+    :root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
+    body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;}
+    .font-mono-brand{font-family:'IBM Plex Mono',monospace;}
+    .tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
+    .panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
+    .btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;}
+    .btn-ghost{border:1px solid var(--steel-line);color:var(--manifest);font-family:'IBM Plex Mono',monospace;}
+    .btn-apply{background:var(--cyan);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;text-decoration:none;}
+    .score-high{background:rgba(79,209,197,.15);color:var(--cyan);}
+    .score-medium{background:rgba(242,169,59,.15);color:var(--amber);}
+    .score-low{background:rgba(226,87,76,.15);color:var(--red);}
+    .tab-btn{padding:8px 16px;border-radius:.5rem;font-family:'IBM Plex Mono',monospace;font-size:.8rem;cursor:pointer;transition:all .3s;}
+    .tab-active{background:var(--amber);color:var(--graphite);font-weight:600;}
+    .tab-inactive{background:transparent;border:1px solid var(--steel-line);color:var(--manifest-dim);}
+    .desc-hidden{display:none;}
+    .desc-shown{display:block;margin-top:10px;padding:12px;background:var(--steel);border-radius:.5rem;font-size:.85em;color:var(--manifest-dim);white-space:pre-wrap;line-height:1.5;max-height:300px;overflow-y:auto;}
+  </style>
+</head>
+<body>
+  <header class="sticky top-0 z-40 backdrop-blur bg-[var(--graphite)]/85 divider"><div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+    <a href="/" class="font-mono-brand font-semibold">APPLYFLOW</a>
+    <div class="flex items-center gap-4"><span id="user-name" class="tag">Guest</span><a href="/signup" class="btn-primary text-xs px-4 py-2 rounded">Sign Up</a></div>
+  </div></header>
+  <main class="max-w-6xl mx-auto px-6 py-12">
+    <div class="flex gap-3 mb-8">
+      <button class="tab-btn tab-active" id="tab-jobs-btn" onclick="switchTab('jobs')">Jobs</button>
+      <button class="tab-btn tab-inactive" id="tab-apps-btn" onclick="switchTab('apps')">Applications</button>
+    </div>
+    <div id="login-prompt" class="panel p-8 text-center mb-8" style="display:none">
+      <h2 class="font-mono-brand font-semibold text-xl mb-3">Set up your profile</h2>
+      <p class="text-[var(--manifest-dim)] mb-6">Select your skills to get personalized job matches.</p>
+      <a href="/signup" class="btn-primary px-8 py-3 rounded text-sm inline-block">Set Up Profile</a>
+    </div>
+    <div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" style="display:none">
+      <div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--cyan)]" id="stat-jobs">0</div><div class="tag mt-1">Jobs</div></div>
+      <div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--amber)]" id="stat-apps">0</div><div class="tag mt-1">Applications</div></div>
+      <div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--cyan)]" id="stat-users">0</div><div class="tag mt-1">Users</div></div>
+      <div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--amber)]" id="stat-tracked">0</div><div class="tag mt-1">Tracked</div></div>
+    </div>
+    <div id="tab-jobs-content"><div id="job-list" class="grid gap-4"></div></div>
+    <div id="tab-apps-content" style="display:none"><div id="app-list" class="grid gap-4"></div></div>
+  </main>
+  <script>
+    let currentToken=localStorage.getItem('va_token')||'';
+    function authHeaders(){
+      const h={'Content-Type':'application/json'};
+      if(currentToken) h['Authorization']='Bearer '+currentToken;
+      return h;
+    }
+    function switchTab(tab){
+      document.getElementById('tab-jobs-btn').className='tab-btn '+(tab==='jobs'?'tab-active':'tab-inactive');
+      document.getElementById('tab-apps-btn').className='tab-btn '+(tab==='apps'?'tab-active':'tab-inactive');
+      document.getElementById('tab-jobs-content').style.display=tab==='jobs'?'block':'none';
+      document.getElementById('tab-apps-content').style.display=tab==='apps'?'block':'none';
+      if(tab==='apps') loadApplications();
+    }
+    function loadData(){
+      if(!currentToken){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
+      document.getElementById('login-prompt').style.display='none';document.getElementById('stats').style.display='grid';
+      fetch('/api/jobs',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
+        if(!data.logged_in){document.getElementById('login-prompt').style.display='block';return;}
+        renderJobs(data.jobs);
+      });
+      fetch('/api/stats').then(r=>r.json()).then(s=>{
+        document.getElementById('stat-jobs').textContent=s.total_jobs;
+        document.getElementById('stat-apps').textContent=s.applications;
+        document.getElementById('stat-users').textContent=s.users||0;
+        document.getElementById('stat-tracked').textContent=s.tracked;
+      });
+    }
+    function loadApplications(){
+      fetch('/api/applications',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
+        const apps=data.applications;
+        if(!apps||apps.length===0){document.getElementById('app-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No applications generated.</div>';return;}
+        let html='';
+        apps.forEach(app=>{
+          const score=app.score||0;
+          const sc=score>=70?'score-high':score>=40?'score-medium':'score-low';
+          html+='<div class="panel p-5"><div class="flex justify-between items-start mb-3"><div><div class="font-mono-brand font-semibold">'+(app.job_title||app.title||'Application').substring(0,60)+'</div><div class="text-sm text-[var(--manifest-dim)]">'+(app.generated_by||'')+'</div></div><span class="tag '+sc+'" style="padding:2px 10px;border-radius:20px">'+score+'/100</span></div><div class="panel p-4 text-sm text-[var(--manifest-dim)]" style="white-space:pre-wrap">'+(app.text||'').substring(0,400)+'...</div></div>';
+        });
+        document.getElementById('app-list').innerHTML=html;
+      });
+    }
+    function renderJobs(jobs){
+      if(!jobs||jobs.length===0){document.getElementById('job-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No jobs.</div>';return;}
+      let html='';
+      jobs.slice(0,30).forEach((job,index)=>{
+        const sc=job.user_score>=70?'score-high':job.user_score>=40?'score-medium':'score-low';
+        const skills=(job.user_matched_skills||[]).slice(0,4).map(s=>'<span class="tag" style="margin-right:4px">'+s+'</span>').join('');
+        const url=job.url||'';
+        const applyBtn=url?'<a href="'+url+'" target="_blank" class="btn-apply text-xs px-4 py-2 rounded">Apply Now</a>':'';
+        const desc=(job.description||'').replace(/'/g,"\\'").substring(0,2000);
+        html+='<div class="panel p-5"><div class="flex justify-between items-start mb-3"><div><div class="font-mono-brand font-semibold">'+job.title.substring(0,60)+'</div><div class="text-sm text-[var(--manifest-dim)]">'+(job.company||'')+' &bull; '+(job.platform||'')+'</div></div><span class="tag '+sc+'" style="padding:2px 10px;border-radius:20px">'+(job.user_score||0)+'/100</span></div><div class="mb-3">'+skills+'</div><div class="flex gap-2">'+applyBtn+'<button class="btn-ghost text-xs px-3 py-2 rounded" onclick="toggleDesc('+index+')">View Description</button></div><div id="desc-'+index+'" class="desc-hidden">'+desc+'</div></div>';
+      });
+      document.getElementById('job-list').innerHTML=html;
+    }
+    function toggleDesc(i){const el=document.getElementById('desc-'+i);el.className=el.className==='desc-hidden'?'desc-shown':'desc-hidden';}
+    loadData();
+  </script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ApplyFlow - Sign Up</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{--graphite:#14171B;--graphite-panel:#1B1F25;--steel:#2A2F37;--steel-line:#363C46;--manifest:#EDEFF1;--manifest-dim:#9BA3AE;--amber:#F2A93B;--cyan:#4FD1C5;}
+    body{background:var(--graphite);color:var(--manifest);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+    .panel{background:var(--graphite-panel);border:1px solid var(--steel-line);border-radius:.5rem;}
+    .tag{font-family:'IBM Plex Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--manifest-dim);}
+    .font-mono-brand{font-family:'IBM Plex Mono',monospace;}
+    .btn-primary{background:var(--amber);color:var(--graphite);font-family:'IBM Plex Mono',monospace;font-weight:600;cursor:pointer;border:none;}
+    .skill-check{display:inline-block;margin:4px;padding:6px 12px;background:var(--steel);border-radius:20px;font-size:.85em;cursor:pointer;transition:all .2s;}
+    .skill-check:has(input:checked){background:var(--cyan);color:var(--graphite);font-weight:600;}
+    .skill-box{display:none;}
+    input[type=text],input[type=email],input[type=password]{background:var(--steel);border:1px solid var(--steel-line);border-radius:.5rem;padding:10px 15px;color:var(--manifest);width:100%;outline:none;}
+  </style>
+</head>
+<body>
+  <div class="panel p-8 max-w-lg w-full">
+    <div class="text-center mb-8"><h1 class="font-mono-brand font-bold text-2xl mb-2">APPLYFLOW</h1><p class="tag">Set up your profile</p></div>
+    <form id="signup-form" class="space-y-4">
+      <div><label class="tag">Email</label><input type="email" id="email" required placeholder="you@example.com"></div>
+      <div><label class="tag">Name</label><input type="text" id="name" placeholder="Your name"></div>
+      <div><label class="tag">Password</label><input type="password" id="password" required placeholder="Min 6 characters"></div>
+      <div><label class="tag">Select your skills</label><div class="mt-2" id="skills-container">{{ skills_html }}</div></div>
+      <button type="submit" class="btn-primary w-full py-3 rounded text-sm">Create Account</button>
+    </form>
+  </div>
+  <script>
+    const emailInput=document.getElementById('email');
+    const passwordInput=document.getElementById('password');
+    const nameInput=document.getElementById('name');
+    function validateEmail(v){return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);}
+    document.getElementById('signup-form').addEventListener('submit',function(e){
+      e.preventDefault();
+      const email=emailInput.value;
+      const password=passwordInput.value;
+      const name=nameInput.value;
+      if(!validateEmail(email)){alert('Enter a valid email');return;}
+      if(!password || password.length < 6){alert('Password must be at least 6 characters');return;}
+      const skills=Array.from(document.querySelectorAll('.skill-box:checked')).map(cb=>cb.value);
+      if(skills.length===0){alert('Select at least one skill');return;}
+      fetch('/api/signup',{method:'POST',body:JSON.stringify({email:email,name:name,password:password,skills:skills}),headers:{'Content-Type':'application/json'}})
+      .then(r=>r.json()).then(data=>{
+        if(data && data.error){alert(data.error);return;}
+        localStorage.setItem('va_token', data.token || '');
+        window.location.href='/dashboard';
+      });
+    });
+  </script>
+</body>
+</html>
