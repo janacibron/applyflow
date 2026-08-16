@@ -136,7 +136,7 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == '/logout':
             self.send_response(302)
             self.send_header('Location', '/login')
-            self.send_header('Set-Cookie', 'va_token=; Path=/; Max-Age=0')
+            self.send_header('Set-Cookie', 'va_token=; Path=/; Max-Age=0; Secure; SameSite=Strict')
             self.end_headers()
             return
         else:
@@ -164,7 +164,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(401)
                 self.send_header('Content-type', 'application/json')
                 if result.get('token'):
-                    self.send_header('Set-Cookie', f"va_token=; Path=/; Max-Age=0")
+                    self.send_header('Set-Cookie', f"va_token=; Path=/; Max-Age=0; Secure; SameSite=Strict")
                 self.end_headers()
                 self.wfile.write(body)
             else:
@@ -172,7 +172,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_header('Content-type', 'application/json')
                 token = result.get('token', '')
                 if token:
-                    self.send_header('Set-Cookie', f"va_token={token}; Path=/; HttpOnly")
+                    # Secure + HttpOnly + SameSite=Strict — prevents CSRF and token leakage
+                    self.send_header('Set-Cookie', f"va_token={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={86400}")
                 self.end_headers()
                 self.wfile.write(body)
         elif path == '/api/logout':
@@ -181,7 +182,7 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.dumps(result).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
-            self.send_header('Set-Cookie', 'va_token=; Path=/; Max-Age=0')
+            self.send_header('Set-Cookie', 'va_token=; Path=/; Max-Age=0; Secure; SameSite=Strict')
             self.end_headers()
             self.wfile.write(body)
         else:

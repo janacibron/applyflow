@@ -26,6 +26,9 @@ SUPABASE_ENABLED = False
 _supabase = None
 _supabase_checked = False
 
+# Session TTL: 24 hours
+SESSION_TTL_SECONDS = 86400
+
 def _init_supabase():
     global SUPABASE_ENABLED, _supabase, _supabase_checked
     if _supabase_checked:
@@ -55,6 +58,27 @@ def _init_supabase():
 
 def _now():
     return datetime.utcnow().isoformat() + 'Z'
+
+def _now_ts():
+    return int(datetime.utcnow().timestamp())
+
+def _is_session_valid(session):
+    """Check session has not expired."""
+    if not session:
+        return False
+    exp = session.get('expires_at')
+    if exp is None:
+        return True  # no expiry = legacy/valid
+    try:
+        if isinstance(exp, (int, float)):
+            return _now_ts() < int(exp)
+        if isinstance(exp, str):
+            from datetime import datetime as dt
+            exp_dt = dt.fromisoformat(exp.replace('Z', '+00:00'))
+            return datetime.utcnow().replace(tzinfo=exp_dt.tzinfo) < exp_dt
+    except Exception:
+        pass
+    return True
 
 
 def _hash_password(password: str) -> str:
@@ -244,13 +268,14 @@ def login_user(email: str, password: str, ip: str = '', user_agent: str = ''):
 
     token = secrets.token_urlsafe(32)
     now = _now()
+    expires_ts = _now_ts() + SESSION_TTL_SECONDS
     session_payload = {
         'token': token,
         'email': user['email'],
         'created_at': now,
         'ip': ip,
         'user_agent': user_agent,
-        'expires_at': None
+        'expires_at': expires_ts
     }
 
     # Persist session and update user counters
@@ -289,7 +314,7 @@ def login_user(email: str, password: str, ip: str = '', user_agent: str = ''):
         'created_at': now,
         'ip': ip,
         'user_agent': user_agent,
-        'expires_at': None
+        'expires_at': expires_ts
     }
     _save_sessions(sessions)
 
@@ -361,15 +386,20 @@ def logout_user(token: str):
 
 def get_session(token: str):
     _init_supabase()
+    session = None
     if SUPABASE_ENABLED:
         try:
             res = _supabase.table('sessions').select('*').eq('token', token).execute()
             if res.data:
-                return res.data[0]
+                session = res.data[0]
         except Exception:
             pass
-    sessions = _load_sessions()
-    return sessions.get(token)
+    if not session:
+        sessions = _load_sessions()
+        session = sessions.get(token)
+    if session and not _is_session_valid(session):
+        return None
+    return session
 
 
 def auth_middleware(headers):
@@ -386,3 +416,31 @@ def auth_middleware(headers):
     if not user:
         return None
     return user
+
+
+def cleanup_expired_sessions():
+    """Remove expired sessions from local store."""
+    sessions = _load_sessions()
+    valid = {}
+    for tok, s in sessions.items():
+        if _is_session_valid(s):
+            valid[tok] = s
+    removed = len(sessions) - len(valid)
+    if removed > 0:
+        _save_sessions(valid)
+    return removed
+
+
+def invalidate_all_user_sessions(email: str):
+    """Invalidate all sessions for a user (e.g., on password change)."""
+    _init_supabase()
+    if SUPABASE_ENABLED:
+        try:
+            _supabase.table('sessions').delete().eq('email', email).execute()
+        except Exception:
+            pass
+    sessions = _load_sessions()
+    to_remove = [tok for tok, s in sessions.items() if s.get('email') == email]
+    for tok in to_remove:
+        del sessions[tok]
+    _save_sessions(sessions)
