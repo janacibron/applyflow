@@ -13,16 +13,16 @@ if _env_path.exists():
     except Exception:
         pass
 
-sys.path.insert(0, 'C:/va-pipeline')
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
 
 from supabase import create_client
 
-DATA = Path("C:/va-pipeline/data")
+DATA = Path(__file__).resolve().parent / "data"
 supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 
 # Ensure governance module is importable
-sys.path.insert(0, 'C:/va-pipeline')
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from governance import log_event, read_events as _read_events
 except Exception:
