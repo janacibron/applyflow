@@ -42,6 +42,7 @@ except Exception:
 from auth import login_user, logout_user, get_session, validate_login, create_user, ensure_default_admin, get_user
 from app_state import transition_application, can_transition, get_allowed_transitions, STATES, TERMINAL_STATES
 from job_state import transition_job, can_transition as can_transition_job, get_allowed_transitions as get_job_transitions
+from profile import get_profile, upsert_profile, profile_completeness, save_job, unsave_job, get_saved_jobs, is_job_saved
 
 SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
 
@@ -135,12 +136,19 @@ class Handler(SimpleHTTPRequestHandler):
         elif path.startswith('/api/jobs/') and path.endswith('/status'):
             self.do_POST()
             return
+        elif path.startswith('/api/jobs/') and path.endswith('/save'):
+            self.do_POST()
+            return
         elif path == '/api/stats':
             self.serve_json(self.get_stats())
         elif path == '/api/governance':
             self.serve_json({"events": _read_events(200)})
         elif path == '/api/me':
             self.serve_json(self.get_me())
+        elif path == '/api/profile':
+            self.serve_json(self.get_profile())
+        elif path == '/api/saved-jobs':
+            self.serve_json({"saved_jobs": self.get_saved_jobs()})
         elif path == '/logout':
             self.send_response(302)
             self.send_header('Location', '/login')
@@ -250,6 +258,34 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "job": updated}).encode())
+        elif path.startswith('/api/jobs/') and path.endswith('/save'):
+            parts = path.strip('/').split('/')
+            job_id = parts[2] if len(parts) >= 3 else ''
+            user = self._current_user()
+            if not user:
+                self.send_response(401); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+                return
+            action = data.get('action', 'save')
+            if action == 'unsave':
+                ok = unsave_job(user['email'], job_id)
+            else:
+                ok = save_job(user['email'], job_id)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": ok}).encode())
+        elif path == '/api/profile':
+            user = self._current_user()
+            if not user:
+                self.send_response(401); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+                return
+            profile = upsert_profile(user['email'], data)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "profile": profile}).encode())
         else:
             self.send_response(404); self.end_headers()
 
@@ -391,6 +427,19 @@ class Handler(SimpleHTTPRequestHandler):
         if not user:
             return {"logged_in": False}
         return {"logged_in": True, "user": {"email": user.get('email'), "name": user.get('name'), "skills": user.get('skills', [])}}
+
+    def get_profile(self):
+        user = self._current_user()
+        if not user:
+            return {"logged_in": False}
+        profile = get_profile(user['email'])
+        return {"logged_in": True, "profile": profile, "completeness": profile_completeness(user['email'])}
+
+    def get_saved_jobs(self):
+        user = self._current_user()
+        if not user:
+            return []
+        return get_saved_jobs(user['email'])
 
     def _skills_html(self):
         return "".join(f'<label class="skill-check"><input type="checkbox" value="{s}" class="skill-box"> {s}</label>' for s in SKILL_OPTIONS)
