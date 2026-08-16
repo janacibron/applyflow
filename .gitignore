@@ -12,3 +12,8 @@ cookies/
 *.backup
 .DS_Store
 Thumbs.db
+# Supabase config - SECRETS
+supabase_config.py
+supabase_config_local.py
+*.env
+.env
