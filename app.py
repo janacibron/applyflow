@@ -1,4 +1,4 @@
-import json, os, sys, webbrowser, threading
+import json, os, sys, threading
 from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -13,16 +13,21 @@ if _env_path.exists():
     except Exception:
         pass
 
-sys.path.insert(0, 'C:/va-pipeline')
-from supabase_config import SUPABASE_URL, SUPABASE_SECRET_KEY
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
-from supabase import create_client
-
-DATA = Path("C:/va-pipeline/data")
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+# Optional Supabase init
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+SUPABASE_SECRET_KEY = os.environ.get('SUPABASE_SECRET_KEY', '')
+supabase = None
+try:
+    if SUPABASE_URL and SUPABASE_SECRET_KEY:
+        from supabase import create_client
+        supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+except Exception:
+    supabase = None
 
 # Ensure governance module is importable
-sys.path.insert(0, 'C:/va-pipeline')
 try:
     from governance import log_event, read_events as _read_events
 except Exception:
@@ -34,6 +39,10 @@ from auth import login_user, logout_user, get_session, validate_login, create_us
 SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
 
 SCHEDULER_INTERVAL = int(os.environ.get("SCHEDULER_INTERVAL", "0"))
+
+DATA = PROJECT_ROOT / 'data'
+TEMPLATES = PROJECT_ROOT / 'templates'
+STATIC = PROJECT_ROOT / 'static'
 
 
 def start_scheduler():
@@ -116,7 +125,7 @@ class Handler(SimpleHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-    
+
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length).decode() if content_length else ""
@@ -141,7 +150,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.serve_json({"ok": logout_user(token)})
         else:
             self.send_response(404); self.end_headers()
-    
+
     def serve_html(self, html):
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -149,7 +158,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(html.encode('utf-8'))
 
     def render_template(self, name, context=None):
-        path = DATA.parent / 'templates' / name
+        path = TEMPLATES / name
         if not path.exists():
             self.send_response(404)
             self.end_headers()
@@ -166,7 +175,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_response(400)
             self.end_headers()
             return None
-        path = DATA.parent / safe
+        path = STATIC / safe
         if not path.exists() or not path.is_file():
             self.send_response(404)
             self.end_headers()
@@ -190,7 +199,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
-    
+
     def get_jobs(self, params):
         user = None
         auth = self.headers.get('Authorization', '')
@@ -203,7 +212,7 @@ class Handler(SimpleHTTPRequestHandler):
             email = params.get('email', [''])[0]
             user = get_user(email)
         if not user: return {"jobs":[], "logged_in":False}
-        
+
         jobs = []
         if supabase is not None:
             try:
@@ -212,15 +221,15 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"Supabase jobs error: {e}", flush=True)
                 jobs = []
-        
+
         for job in jobs:
             scoring = score_job_for_user(job, user.get('skills', []))
             job['user_score'] = scoring['score']
             job['user_matched_skills'] = scoring['matched_skills']
-        
+
         jobs = sorted(jobs, key=lambda x: x.get('user_score',0), reverse=True)
         return {"jobs":jobs, "logged_in":True, "user_skills":user.get('skills',[])}
-    
+
     def get_applications(self):
         apps = []
         if supabase is not None:
@@ -231,7 +240,7 @@ class Handler(SimpleHTTPRequestHandler):
                 print(f"Supabase apps error: {e}", flush=True)
                 apps = []
         return {"applications": apps, "total": len(apps)}
-    
+
     def get_stats(self):
         jobs_count = apps_count = users_count = 0
         if supabase is not None:
@@ -242,7 +251,7 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"Supabase stats error: {e}", flush=True)
         return {"total_jobs": jobs_count, "applications": apps_count, "tracked": 0, "responses": 0, "users": users_count}
-    
+
     def log_message(self, *args): pass
 
     def _current_token(self):
@@ -273,7 +282,7 @@ class Handler(SimpleHTTPRequestHandler):
         return self.render_template('dashboard.html') or ''
 
 print("ApplyFlow running at http://localhost:8000 (Supabase backend)")
-PORT = int(os.environ.get('PORT', 8000))
+PORT = int(os.environ.get("PORT", 8000))
 start_scheduler()
 ensure_default_admin()
 if __name__ == '__main__':
