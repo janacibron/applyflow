@@ -41,6 +41,7 @@ except Exception:
 
 from auth import login_user, logout_user, get_session, validate_login, create_user, ensure_default_admin, get_user
 from app_state import transition_application, can_transition, get_allowed_transitions, STATES, TERMINAL_STATES
+from job_state import transition_job, can_transition as can_transition_job, get_allowed_transitions as get_job_transitions
 
 SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
 
@@ -130,6 +131,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.serve_json(self.get_applications())
         elif path.startswith('/api/applications/') and path.endswith('/status'):
             # POST /api/applications/:id/status — transition state
+            self.do_POST()
+            return
+        elif path.startswith('/api/jobs/') and path.endswith('/status'):
             self.do_POST()
             return
         elif path == '/api/stats':
@@ -222,6 +226,37 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True, "application": updated}).encode())
+        elif path.startswith('/api/jobs/') and path.endswith('/status'):
+            parts = path.strip('/').split('/')
+            job_id = parts[2] if len(parts) >= 3 else ''
+            new_state = data.get('status', '')
+            user = self._current_user()
+            if not user:
+                self.send_response(401); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+                return
+            # Only admin/moderator can change job status
+            if user.get('role') not in ('admin', 'moderator'):
+                self.send_response(403); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Forbidden — admin only"}).encode())
+                return
+            # Load jobs
+            jobs = self.get_jobs({}).get('jobs', [])
+            job = next((j for j in jobs if j.get('id') == job_id), None)
+            if not job:
+                self.send_response(404); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Job not found"}).encode())
+                return
+            actor = 'moderator' if user.get('role') == 'moderator' else 'system'
+            updated, err = transition_job(job, new_state, actor=actor)
+            if err:
+                self.send_response(422); self.end_headers()
+                self.wfile.write(json.dumps({"error": err}).encode())
+                return
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "job": updated}).encode())
         else:
             self.send_response(404); self.end_headers()
 
