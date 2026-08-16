@@ -205,12 +205,13 @@ class Handler(SimpleHTTPRequestHandler):
         if not user: return {"jobs":[], "logged_in":False}
         
         jobs = []
-        if supabase:
+        if supabase is not None:
             try:
                 result = supabase.table('jobs').select('*').execute()
                 jobs = result.data or []
-            except:
-                pass
+            except Exception as e:
+                print(f"Supabase jobs error: {e}", flush=True)
+                jobs = []
         
         for job in jobs:
             scoring = score_job_for_user(job, user.get('skills', []))
@@ -222,21 +223,24 @@ class Handler(SimpleHTTPRequestHandler):
     
     def get_applications(self):
         apps = []
-        if supabase:
+        if supabase is not None:
             try:
                 result = supabase.table('applications').select('*').order('created_at', desc=True).execute()
                 apps = result.data or []
-            except:
-                pass
+            except Exception as e:
+                print(f"Supabase apps error: {e}", flush=True)
+                apps = []
         return {"applications": apps, "total": len(apps)}
     
     def get_stats(self):
-        try:
-            jobs_count = supabase.table('jobs').select('count', count='exact').execute().count
-            apps_count = supabase.table('applications').select('count', count='exact').execute().count
-            users_count = supabase.table('users').select('count', count='exact').execute().count
-        except:
-            jobs_count = apps_count = users_count = 0
+        jobs_count = apps_count = users_count = 0
+        if supabase is not None:
+            try:
+                jobs_count = supabase.table('jobs').select('count', count='exact').execute().count
+                apps_count = supabase.table('applications').select('count', count='exact').execute().count
+                users_count = supabase.table('users').select('count', count='exact').execute().count
+            except Exception as e:
+                print(f"Supabase stats error: {e}", flush=True)
         return {"total_jobs": jobs_count, "applications": apps_count, "tracked": 0, "responses": 0, "users": users_count}
     
     def log_message(self, *args): pass
