@@ -27,7 +27,7 @@
 <body>
   <header class="sticky top-0 z-40 backdrop-blur bg-[var(--graphite)]/85 divider"><div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
     <a href="/" class="font-mono-brand font-semibold">APPLYFLOW</a>
-    <div class="flex items-center gap-4"><span id="user-name" class="tag">Guest</span><a href="/signup" class="btn-primary text-xs px-4 py-2 rounded">Sign Up</a></div>
+    <div class="flex items-center gap-4"><span id="user-name" class="tag">Guest</span><a href="/signup" class="btn-primary text-xs px-4 py-2 rounded" id="signup-btn">Sign Up</a><a href="/logout" class="btn-ghost text-xs px-4 py-2 rounded" id="logout-btn" style="display:none">Sign Out</a></div>
   </div></header>
   <main class="max-w-6xl mx-auto px-6 py-12">
     <div class="flex gap-3 mb-8">
@@ -103,7 +103,8 @@
       document.getElementById('job-list').innerHTML=html;
     }
     function toggleDesc(i){const el=document.getElementById('desc-'+i);el.className=el.className==='desc-hidden'?'desc-shown':'desc-hidden';}
-    loadData();
+    document.getElementById('logout-btn').addEventListener('click', logout);
+loadData();
   </script>
 </body>
 </html>
