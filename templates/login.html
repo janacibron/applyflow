@@ -51,7 +51,7 @@
       .then(r=>r.json()).then(data=>{
         if(data.ok){
           localStorage.setItem('va_token', data.token);
-          window.location.href='/dashboard';
+          window.location.href='/dashboard?token=' + encodeURIComponent(data.token);
         } else {
           showError((data.errors||[]).join(' '));
         }

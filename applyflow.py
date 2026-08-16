@@ -95,7 +95,11 @@ class Handler(SimpleHTTPRequestHandler):
             if html is not None:
                 self.serve_html(html)
         elif path == '/dashboard':
-            if not self._current_token():
+            token = self._current_token()
+            if not token:
+                qs = parse_qs(urlparse(self.path).query)
+                token = qs.get('token', [''])[0]
+            if not token:
                 self.send_response(302)
                 self.send_header('Location', '/login')
                 self.end_headers()
@@ -138,16 +142,31 @@ class Handler(SimpleHTTPRequestHandler):
             ip = self.headers.get('X-Forwarded-For', self.client_address[0] if hasattr(self, 'client_address') else '')
             ua = self.headers.get('User-Agent', '')
             result = login_user(data.get('email',''), data.get('password',''), ip=ip, user_agent=ua)
+            body = json.dumps(result).encode('utf-8')
             if not result.get('ok'):
                 self.send_response(401)
                 self.send_header('Content-type', 'application/json')
+                if result.get('token'):
+                    self.send_header('Set-Cookie', f"va_token=; Path=/; Max-Age=0")
                 self.end_headers()
-                self.wfile.write(json.dumps(result).encode())
+                self.wfile.write(body)
             else:
-                self.serve_json(result)
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                token = result.get('token', '')
+                if token:
+                    self.send_header('Set-Cookie', f"va_token={token}; Path=/; HttpOnly")
+                self.end_headers()
+                self.wfile.write(body)
         elif path == '/api/logout':
             token = data.get('token', '')
-            self.serve_json({"ok": logout_user(token)})
+            result = {"ok": logout_user(token)}
+            body = json.dumps(result).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Set-Cookie', 'va_token=; Path=/; Max-Age=0')
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_response(404); self.end_headers()
 
