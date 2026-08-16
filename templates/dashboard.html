@@ -49,8 +49,8 @@
       <div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--cyan)]" id="stat-users">0</div><div class="tag mt-1">Users</div></div>
       <div class="panel p-5 text-center"><div class="font-mono-brand text-3xl text-[var(--amber)]" id="stat-tracked">0</div><div class="tag mt-1">Tracked</div></div>
     </div>
-    <div id="tab-jobs-content"><div id="job-list" class="grid gap-4"></div></div>
-    <div id="tab-apps-content" style="display:none"><div id="app-list" class="grid gap-4"></div></div>
+    <div id="tab-jobs-content"><div id="job-list" class="grid gap-4"><div id="jobs-loading" class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm" style="display:none">Loading jobs...</div></div></div>
+    <div id="tab-apps-content" style="display:none"><div id="app-list" class="grid gap-4"><div id="apps-loading" class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm" style="display:none">Loading applications...</div></div></div>
   </main>
   <script>
     // Token: prefer localStorage, fall back to cookie (server-side authoritative via cookie)
@@ -116,10 +116,12 @@
     function loadData(){
       if(!currentToken){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
       document.getElementById('login-prompt').style.display='none';document.getElementById('stats').style.display='grid';
+      document.getElementById('jobs-loading').style.display='block';
       fetch('/api/jobs',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
+        document.getElementById('jobs-loading').style.display='none';
         if(!data || !data.logged_in){document.getElementById('login-prompt').style.display='block';document.getElementById('stats').style.display='none';return;}
         renderJobs(data.jobs);
-      }).catch(()=>{});
+      }).catch(()=>{document.getElementById('jobs-loading').style.display='none';document.getElementById('job-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">Failed to load jobs. <button onclick="loadData()" class="text-[var(--cyan)] ml-2">Retry</button></div>';});
       fetch('/api/stats').then(r=>r.json()).then(s=>{
         document.getElementById('stat-jobs').textContent=s.total_jobs;
         document.getElementById('stat-apps').textContent=s.applications;
@@ -128,7 +130,9 @@
       }).catch(()=>{});
     }
     function loadApplications(){
+      document.getElementById('apps-loading').style.display='block';
       fetch('/api/applications',{headers:authHeaders()}).then(r=>r.json()).then(data=>{
+        document.getElementById('apps-loading').style.display='none';
         const apps=data.applications;
         if(!apps||apps.length===0){document.getElementById('app-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No applications generated.</div>';return;}
         let html='';
@@ -138,7 +142,7 @@
           html+='<div class="panel p-5"><div class="flex justify-between items-start mb-3"><div><div class="font-mono-brand font-semibold">'+(app.job_title||app.title||'Application').substring(0,60)+'</div><div class="text-sm text-[var(--manifest-dim)]">'+(app.generated_by||'')+'</div></div><span class="tag '+sc+'" style="padding:2px 10px;border-radius:20px">'+score+'/100</span></div><div class="panel p-4 text-sm text-[var(--manifest-dim)]" style="white-space:pre-wrap">'+(app.text||'').substring(0,400)+'...</div></div>';
         });
         document.getElementById('app-list').innerHTML=html;
-      }).catch(()=>{});
+      }).catch(()=>{document.getElementById('apps-loading').style.display='none';document.getElementById('app-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">Failed to load applications. <button onclick="loadApplications()" class="text-[var(--cyan)] ml-2">Retry</button></div>';});
     }
     function renderJobs(jobs){
       if(!jobs||jobs.length===0){document.getElementById('job-list').innerHTML='<div class="panel p-8 text-center text-[var(--manifest-dim)] font-mono-brand text-sm">No jobs.</div>';return;}

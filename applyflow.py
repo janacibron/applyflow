@@ -368,7 +368,31 @@ class Handler(SimpleHTTPRequestHandler):
             job['user_score'] = scoring['score']
             job['user_matched_skills'] = scoring['matched_skills']
 
-        jobs = sorted(jobs, key=lambda x: x.get('user_score',0), reverse=True)
+        # Search/filter
+        keyword = params.get('keyword', [''])[0].lower()
+        platform = params.get('platform', [''])[0].lower()
+        location = params.get('location', [''])[0].lower()
+        min_score = int(params.get('min_score', ['0'])[0])
+        sort_by = params.get('sort_by', ['score'])[0]
+        limit = min(int(params.get('limit', ['30'])[0]), 100)
+
+        if keyword:
+            jobs = [j for j in jobs if keyword in (j.get('title','') + ' ' + j.get('description','')).lower()]
+        if platform:
+            jobs = [j for j in jobs if platform in (j.get('platform','') or '').lower()]
+        if location:
+            jobs = [j for j in jobs if location in (j.get('location','') or '').lower()]
+        if min_score > 0:
+            jobs = [j for j in jobs if j.get('user_score', 0) >= min_score]
+
+        if sort_by == 'score':
+            jobs = sorted(jobs, key=lambda x: x.get('user_score',0), reverse=True)
+        elif sort_by == 'date':
+            jobs = sorted(jobs, key=lambda x: x.get('posted_date',''), reverse=True)
+        elif sort_by == 'rate':
+            jobs = sorted(jobs, key=lambda x: x.get('rate',''), reverse=True)
+
+        jobs = jobs[:limit]
         return {"jobs":jobs, "logged_in":True, "user_skills":user.get('skills',[])}
 
     def get_applications(self):
