@@ -128,7 +128,14 @@ class Handler(SimpleHTTPRequestHandler):
         elif path == '/api/login':
             ip = self.headers.get('X-Forwarded-For', self.client_address[0] if hasattr(self, 'client_address') else '')
             ua = self.headers.get('User-Agent', '')
-            self.serve_json(login_user(data.get('email',''), data.get('password',''), ip=ip, user_agent=ua))
+            result = login_user(data.get('email',''), data.get('password',''), ip=ip, user_agent=ua)
+            if not result.get('ok'):
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+            else:
+                self.serve_json(result)
         elif path == '/api/logout':
             token = data.get('token', '')
             self.serve_json({"ok": logout_user(token)})

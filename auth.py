@@ -207,7 +207,7 @@ def ensure_default_admin():
             existing = _supabase.table('users').select('email').eq('email', DEFAULT_ADMIN['email']).execute()
             if not existing.data:
                 payload = dict(DEFAULT_ADMIN)
-                payload['password_hash'] = _hash_password('admin')
+                payload['password_hash'] = _hash_password('admin123')
                 payload['created'] = _now()
                 _supabase.table('users').insert(payload).execute()
                 return
@@ -216,7 +216,7 @@ def ensure_default_admin():
     users = _load_users()
     emails = {u['email'] for u in users}
     if DEFAULT_ADMIN['email'] not in emails:
-        DEFAULT_ADMIN['password_hash'] = _hash_password('admin')
+        DEFAULT_ADMIN['password_hash'] = _hash_password('admin123')
         DEFAULT_ADMIN['created'] = _now()
         users.append(DEFAULT_ADMIN)
         _save_users(users)
