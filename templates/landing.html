@@ -44,5 +44,22 @@ if (token) {
     }
 }
 </script>
+<script>
+const token = localStorage.getItem('va_token') || document.cookie.split('; ').find(r=>r.startsWith('va_token='))?.split('=')[1];
+if (token) {
+    const email = localStorage.getItem('va_email') || '';
+    const navLinks = document.querySelectorAll('nav a');
+    navLinks.forEach(a => {
+        if (a.textContent === 'Login' || a.textContent === 'Sign Up') {
+            a.style.display = 'none';
+        }
+    });
+    const logout = document.createElement('a');
+    logout.href = '/logout';
+    logout.textContent = 'Sign Out';
+    logout.className = 'hover:text-[var(--cyan)]';
+    document.querySelector('nav').appendChild(logout);
+}
+</script>
 </body>
 </html>
