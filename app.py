@@ -40,6 +40,7 @@ except Exception:
     def log_event(*a, **k): pass
 
 from auth import login_user, logout_user, get_session, validate_login, create_user, ensure_default_admin, get_user
+from app_state import transition_application, can_transition, get_allowed_transitions, STATES, TERMINAL_STATES
 
 SKILL_OPTIONS = ["SEO", "Content Writing", "WordPress", "Social Media", "Email Management", "Calendar Management", "Data Entry", "Customer Service", "GoHighLevel", "Video Editing", "Canva", "Copywriting", "AI Tools", "Admin Support", "Marketing", "Sales"]
 
@@ -127,6 +128,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.serve_json(self.get_jobs(parse_qs(urlparse(self.path).query)))
         elif path == '/api/applications':
             self.serve_json(self.get_applications())
+        elif path.startswith('/api/applications/') and path.endswith('/status'):
+            # POST /api/applications/:id/status — transition state
+            self.do_POST()
+            return
         elif path == '/api/stats':
             self.serve_json(self.get_stats())
         elif path == '/api/governance':
@@ -185,6 +190,38 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header('Set-Cookie', 'va_token=; Path=/; Max-Age=0; Secure; SameSite=Strict')
             self.end_headers()
             self.wfile.write(body)
+        elif path.startswith('/api/applications/') and path.endswith('/status'):
+            # POST /api/applications/:id/status
+            parts = path.strip('/').split('/')
+            app_id = parts[2] if len(parts) >= 3 else ''
+            new_state = data.get('status', '')
+            user = self._current_user()
+            if not user:
+                self.send_response(401); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+                return
+            # Load applications
+            apps = self.get_applications().get('applications', [])
+            app = next((a for a in apps if a.get('id') == app_id), None)
+            if not app:
+                self.send_response(404); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Application not found"}).encode())
+                return
+            # Ownership check
+            if app.get('user_id') != user.get('email') and user.get('role') != 'admin':
+                self.send_response(403); self.end_headers()
+                self.wfile.write(json.dumps({"error": "Forbidden"}).encode())
+                return
+            reason = data.get('reason', '')
+            updated, err = transition_application(app, new_state, actor='user', reason=reason)
+            if err:
+                self.send_response(422); self.end_headers()
+                self.wfile.write(json.dumps({"error": err}).encode())
+                return
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "application": updated}).encode())
         else:
             self.send_response(404); self.end_headers()
 
