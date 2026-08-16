@@ -19,7 +19,7 @@
 <body>
   <header class="sticky top-0 z-40 backdrop-blur bg-[var(--graphite)]/85 divider"><div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
     <a href="/" class="font-mono-brand font-semibold">APPLYFLOW</a>
-    <nav class="flex items-center gap-6 tag"><a href="/login" class="hover:text-[var(--cyan)]">Login</a><a href="/signup" class="hover:text-[var(--cyan)]">Sign Up</a><a href="/dashboard" class="hover:text-[var(--cyan)]">Dashboard</a></nav>
+    <nav class="flex items-center gap-6 tag"><a href="/login" class="hover:text-[var(--cyan)]" id="nav-login">Login</a><a href="/signup" class="hover:text-[var(--cyan)]" id="nav-signup">Sign Up</a><a href="/dashboard" class="hover:text-[var(--cyan)]">Dashboard</a><a href="/logout" class="hover:text-[var(--cyan)]" id="nav-logout" style="display:none">Sign Out</a></nav>
     <a href="/signup" class="btn-primary text-xs px-4 py-2 rounded">Get Started</a>
   </div></header>
   <section class="max-w-6xl mx-auto px-6 pt-20 pb-16 grid md:grid-cols-2 gap-12 items-center">
@@ -31,5 +31,18 @@
     <div class="space-y-1"><div>[DB] 150 jobs in Supabase</div><div>[USER] Personalized scoring</div><div class="text-[var(--amber)]">[MATCH] Top jobs found</div></div></div>
   </section>
   <footer class="divider"><div class="max-w-6xl mx-auto px-6 py-10 text-center tag">ApplyFlow 2026</div></footer>
+<script>
+const token = localStorage.getItem('va_token') || document.cookie.split('; ').find(r=>r.startsWith('va_token='))?.split('=')[1];
+if (token) {
+    document.getElementById('nav-login').style.display = 'none';
+    document.getElementById('nav-signup').style.display = 'none';
+    document.getElementById('nav-logout').style.display = 'inline';
+    const email = localStorage.getItem('va_email');
+    if (email) {
+        document.getElementById('nav-login').textContent = email.split('@')[0];
+        document.getElementById('nav-login').style.display = 'inline';
+    }
+}
+</script>
 </body>
 </html>
